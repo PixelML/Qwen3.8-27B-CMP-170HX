@@ -1,0 +1,28 @@
+{"tag": "dflash2-k7", "prompt_tokens": {"story": 11, "long": 6603}}
+{"tag": "dflash2-k7", "run": "decode256", "i": 0, "ttft_ms": 165.2, "total_s": 2.248, "out_tok": 256, "decode_tok_s": 122.45}
+{"tag": "dflash2-k7", "run": "decode256", "i": 1, "ttft_ms": 185.2, "total_s": 2.269, "out_tok": 256, "decode_tok_s": 122.37}
+{"tag": "dflash2-k7", "run": "decode256", "i": 2, "ttft_ms": 194.2, "total_s": 2.277, "out_tok": 256, "decode_tok_s": 122.43}
+{"tag": "dflash2-k7", "summary": "decode256", "prompt_tokens": 11, "mean_ttft_ms": 181.5, "mean_total_s": 2.265, "mean_out_tok": 256.0, "decode_tok_s": 122.42, "prefill_tok_s": 60.6}
+{"tag": "dflash2-k7", "run": "decode900", "i": 0, "ttft_ms": 163.9, "total_s": 8.223, "out_tok": 900, "decode_tok_s": 111.55}
+{"tag": "dflash2-k7", "run": "decode900", "i": 1, "ttft_ms": 167.7, "total_s": 8.233, "out_tok": 900, "decode_tok_s": 111.47}
+{"tag": "dflash2-k7", "run": "decode900", "i": 2, "ttft_ms": 176.6, "total_s": 8.301, "out_tok": 900, "decode_tok_s": 110.65}
+{"tag": "dflash2-k7", "summary": "decode900", "prompt_tokens": 11, "mean_ttft_ms": 169.4, "mean_total_s": 8.252, "mean_out_tok": 900.0, "decode_tok_s": 111.22, "prefill_tok_s": 64.9}
+{"tag": "dflash2-k7", "run": "prefill_long", "i": 0, "ttft_ms": 4917.8, "total_s": 4.991, "out_tok": 8, "decode_tok_s": 95.61}
+{"tag": "dflash2-k7", "run": "prefill_long", "i": 1, "ttft_ms": 4925.1, "total_s": 5.003, "out_tok": 8, "decode_tok_s": 89.58}
+{"tag": "dflash2-k7", "run": "prefill_long", "i": 2, "ttft_ms": 4918.5, "total_s": 4.991, "out_tok": 8, "decode_tok_s": 96.94}
+{"tag": "dflash2-k7", "summary": "prefill_long", "prompt_tokens": 6603, "mean_ttft_ms": 4920.5, "mean_total_s": 4.995, "mean_out_tok": 8.0, "decode_tok_s": 93.94, "prefill_tok_s": 1341.9}
+{"tag": "dflash2-k7", "gpu1_peak": {"util": 100.0, "power": 389.99, "mem": 21957.0, "clk": 1980.0, "temp": 70.0}}
+{"tag": "baseline-nospec", "prompt_tokens": {"story": 11, "long": 6603}}
+{"tag": "baseline-nospec", "run": "decode256", "i": 0, "ttft_ms": 111.0, "total_s": 4.907, "out_tok": 256, "decode_tok_s": 53.17}
+{"tag": "baseline-nospec", "run": "decode256", "i": 1, "ttft_ms": 148.1, "total_s": 4.946, "out_tok": 256, "decode_tok_s": 53.15}
+{"tag": "baseline-nospec", "run": "decode256", "i": 2, "ttft_ms": 108.7, "total_s": 4.91, "out_tok": 256, "decode_tok_s": 53.11}
+{"tag": "baseline-nospec", "summary": "decode256", "prompt_tokens": 11, "mean_ttft_ms": 122.6, "mean_total_s": 4.921, "mean_out_tok": 256.0, "decode_tok_s": 53.14, "prefill_tok_s": 89.7}
+{"tag": "baseline-nospec", "run": "decode900", "i": 0, "ttft_ms": 99.7, "total_s": 17.068, "out_tok": 900, "decode_tok_s": 52.98}
+{"tag": "baseline-nospec", "run": "decode900", "i": 1, "ttft_ms": 116.6, "total_s": 17.102, "out_tok": 900, "decode_tok_s": 52.93}
+{"tag": "baseline-nospec", "run": "decode900", "i": 2, "ttft_ms": 130.8, "total_s": 17.198, "out_tok": 900, "decode_tok_s": 52.67}
+{"tag": "baseline-nospec", "summary": "decode900", "prompt_tokens": 11, "mean_ttft_ms": 115.7, "mean_total_s": 17.123, "mean_out_tok": 900.0, "decode_tok_s": 52.86, "prefill_tok_s": 95.1}
+{"tag": "baseline-nospec", "run": "prefill_long", "i": 0, "ttft_ms": 4878.3, "total_s": 5.011, "out_tok": 8, "decode_tok_s": 52.73}
+{"tag": "baseline-nospec", "run": "prefill_long", "i": 1, "ttft_ms": 4875.1, "total_s": 5.008, "out_tok": 8, "decode_tok_s": 52.49}
+{"tag": "baseline-nospec", "run": "prefill_long", "i": 2, "ttft_ms": 4877.8, "total_s": 5.011, "out_tok": 8, "decode_tok_s": 52.45}
+{"tag": "baseline-nospec", "summary": "prefill_long", "prompt_tokens": 6603, "mean_ttft_ms": 4877.1, "mean_total_s": 5.01, "mean_out_tok": 8.0, "decode_tok_s": 52.56, "prefill_tok_s": 1353.9}
+{"tag": "baseline-nospec", "gpu1_peak": {"util": 100.0, "power": 389.51, "mem": 22203.0, "clk": 1950.0, "temp": 75.0}}

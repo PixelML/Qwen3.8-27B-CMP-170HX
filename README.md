@@ -121,3 +121,46 @@ Per the author, the intended install is **not** the GHCR image: it's
 above (that's what backports DFlash2 and the Ampere-specific fixes). The GHCR
 image that defeated this run was only a prebuilt convenience artifact — and it
 is private.
+
+---
+
+## Update 2026-08-28: RTX 3090 baseline + multi-GPU scaling notes
+
+We ran the identical recipe (repo patches, W4A16 fast variant, DFlash2 k=7,
+vLLM 0.27.1) on a local RTX 3090 to anchor the CMP 170HX result:
+
+| Metric | RTX 3090 (24 GB) | CMP 170HX (64 GB) | 170HX advantage |
+|---|---|---|---|
+| Decode 256 tok | **122.42 tok/s** | **147.7 tok/s** | **1.21x** |
+| Decode 900 tok | 111.22 tok/s | 134.5 tok/s | 1.21x |
+| TTFT (11-tok prompt) | 181.5 ms | 76 ms | 2.4x |
+| Prefill (6.6K tok) | 1341.9 tok/s | 2156 tok/s | 1.61x |
+| Baseline, no spec (256 tok) | 53.14 tok/s | — | — |
+| DFlash2 speedup | 2.30x | — | — |
+| Peak VRAM | 21.9 GiB | 57.8 GiB | — |
+| Peak power | 390 W (cap) | 255 W | — |
+
+Key takeaways:
+
+1. **DFlash2 speculation is the dominant factor on Ampere** — 2.30x on the
+   3090, same family as the 170HX. Both cards are compute/power saturated
+   under speculative load, so the 170HX's 1.6x memory-bandwidth edge
+   shrinks to 1.21x per-card decode advantage.
+2. **Prefill scales with bandwidth** (1.61x, closer to the HW ratio) —
+   long-prompt workloads benefit more from the 170HX than short-prompt
+   chat does.
+3. **Power efficiency is the 170HX's quiet win**: 255 W vs 390 W at higher
+   throughput — ~2.4x more tokens per watt.
+
+Full data: [artifacts/rtx3090-baseline/results.json](artifacts/rtx3090-baseline/results.json).
+Raw per-run samples: [artifacts/rtx3090-baseline/bench-stdout.jsonl](artifacts/rtx3090-baseline/bench-stdout.jsonl).
+
+### Multi-GPU scaling attempt (8x/4x TP on Vast, failed — for the record)
+
+A companion attempt to benchmark GLM-5.3-Flash-AWQ (8x 170HX) and
+Qwen3.8-Flash-Next-AWQ (4x 170HX) on Vast.ai failed before serving: the
+instances were created with 17-20 GB disks, far below the 168-176 GiB model
+sizes; the GLM run died mid-download (HF Xet \"background writer channel
+\" error after 380 s). Both instances were destroyed ~50 min in; total cost
+~$2.35. Lesson: check `disk_space >= model_size + headroom` before creating
+any instance. No benchmark numbers were produced and none are invented here.
