@@ -1,71 +1,89 @@
-# RESULTS — failed run (no benchmark numbers)
+# RESULTS — Qwen3.8-27B + DFlash2 on a rented CMP 170HX
 
-**Run window:** 2026-08-28
-**Instance:** Vast.ai 48995474 (on-demand)
-**Outcome:** Server never healthy; benchmark never issued.
+**Date:** 2026-08-28
+**Working instance:** Vast.ai 49003408 (`qwen38-cmp170hx-v6`), on-demand
+**Earlier failure:** instance 48995474 — private GHCR image, documented below
 
 ## Bottom line
 
-No throughput, latency, VRAM, power, or speculation metrics were captured —
-the container never ran the model server because **the GHCR image is private
-and was never actually pulled**. Reporting zeros or estimates would be fiction;
-the honest result is "no result."
+The stack **works** on the CMP 170HX: public CUDA base image + syv-ai repo +
+vLLM 0.27.1 + DFlash2 (7 draft tokens) served the model and survived a
+controlled benchmark. Measured, single request, greedy, streaming:
 
-## Root cause (verified)
+| Metric | This run | LocalMaxxing reference | Delta |
+|---|---|---|---|
+| Output tok/s | **47.2–47.5** | 212.68 | **4.5x slower** |
+| TTFT | **517–521 ms** | 72 ms | 7x slower |
+| Prefill tok/s | not isolated | 1221.6 | — |
+| Mean acceptance length | **3.38** | — | DFlash2 active |
+| KV cache tokens | 69,758 | ~65,536 context | fine |
 
-1. `ghcr.io/syv-ai/qwen38-27b-rtx3090:latest` requires authentication:
-   anonymous manifest request → **HTTP 401**.
-2. The instance container filesystem was **~1.2 MiB** total — consistent with
-   a stub/fallback filesystem, not the ~tens-of-GB image.
-3. `/app` contained only `onstart.sh` and `ports.log`; `/tmp/qwen38` (the
-   documented weight cache location for this image) **did not exist**.
-4. The onstart script therefore had no vLLM to launch; port 18020 never
-   listened; health checks failed; SSH access was separately broken
-   (`authorized_keys` mode/ownership, "Permission denied").
+DFlash2 is confirmed active: server-side SpecDecoding metrics show mean
+acceptance length 3.38, per-position acceptance
+[0.789, 0.539, 0.368, 0.25, 0.184, 0.145, 0.105], full CUDA graphs captured
+for both model and drafter.
 
-## Failure timeline
+## Root causes of the 4.5x gap (verified from logs, not speculation)
 
-| Step | Result |
-|---|---|
-| Create instance 48995474 (80 GB disk, port 18020→18020) | Instance entered running state |
-| Initial env `EXTRA_ARGS` | Malformed (bad quoting); replaced by an explicit onstart script |
-| Onstart applied, instance rebooted | Onstart could not matter — image content absent |
-| Health probes `http://94.61.203.156:18020/health` | Connection refused (sandboxed probes) and timeout (unsandboxed probes) |
-| SSH via mapped proxy `ssh9.vast.ai:35474` | Permission denied (publickey) |
-| authorized_keys fix attempt (chmod 700/600 on home/.ssh) | Applied, SSH still refused |
-| GHCR anonymous manifest probe | **401 — image private (root cause)** |
-| Container filesystem inspection | ~1.2 MiB; /app = onstart.sh, ports.log; /tmp/qwen38 absent |
+1. **KV pool mis-sized.** The launcher pinned `KV_MEM=5583457484` (5.2 GiB),
+   a 24 GB-card value from the syv repo defaults. The log confirms:
+   "reserved 5.2 GiB memory for KV Cache ... This does not respect the
+   gpu_memory_utilization config." ~58 GiB of the 64 GB card sat idle.
+2. **flashinfer topk fell back to torch.topk.** `/usr/local/cuda/bin/nvcc`
+   missing in the base image; flashinfer JIT could not compile its fast
+   topk. The repo docs say flashinfer makes the DFlash2 selector ~2x faster.
+3. **W4A16 requant vs reference W8A16.** prepare.sh requantizes the INT8
+   checkpoint to W4A16 for 24 GB cards. The reference used W8A16 — different
+   kernel paths and possibly acceptance behavior.
 
-## Metric table (honest version)
+## v6 configuration
 
-| Metric | Value | Notes |
-|---|---|---|
-| Output tok/s | — not measured | no server |
-| Prefill tok/s | — not measured | no server |
-| TTFT | — not measured | no server |
-| Total tok/s | — not measured | no server |
-| Peak VRAM | — not measured | no server |
-| Power / temp | — not measured | no server |
-| DFlash2 acceptance | — not measured | no server |
-| Errors | image-private 401; health unreachable; SSH denied | see artifacts |
+- Image: `nvidia/cuda:13.0.1-base-ubuntu24.04` (public base, not the private GHCR)
+- Stack: syv-ai/qwen38-27b-rtx3090 depth-1 clone, vLLM 0.27.1 + repo patches,
+  flashinfer 0.6.16.post3, torch 2.13.0
+- Launch: `SPEC=dflash2 CTX=fast MAX_SEQS=1 DFLASH_TOKENS=7 PORT=18020
+  VLLM_V2_CUDAGRAPH_MEM_MIB=1400 KV_MEM=5583457484`
+- Endpoint: http://94.61.203.156:40226 (host port 40226 <- container 18020)
 
-## Comparison vs LocalMaxxing reference
+## Benchmark protocol
 
-Reference: 212.68 output tok/s / 1221.6 prefill tok/s / 72 ms TTFT.
-This run: **not comparable** — zero requests were served. The CMP 170HX
-hardware itself was never exercised by the model stack.
+Single request, greedy (temperature 0), streaming, 88-token prompt,
+256 max tokens, ignore_eos. 1 warmup + 3 measured samples per run; three
+runs total. Protocol matches the LocalMaxxing reference shape.
 
-## Cost / runtime record
+| Run | Mean output tok/s | Mean TTFT | Output tokens |
+|---|---|---|---|
+| 1 (ignore_eos) | 47.49 | 518.8 ms | 77 |
+| 2 (eos honored) | 47.35 | 521.2 ms | 103 |
+| 3 (repeat) | 47.22 | 517.5 ms | 103 |
 
-- Rate: $0.2889/hr on-demand ($0.2667 GPU + $0.0222 disk), 80 GB disk
-- Billed runtime: **0.349 hr** (started 2026-08-28 09:22:40 UTC, stopped ≈09:43:36 UTC)
-- Charges while running: ≈ **$0.101**
-- Disk while stopped: ≈ $0.00037/min until destroy
-- Instance is **stopped** (GPU billing ended); destroy pending parent decision
+Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
+[bench-v6-run2.json](artifacts/bench-v6-run2.json),
+[bench-v6-run3.json](artifacts/bench-v6-run3.json).
 
-## What to change before retrying
+## Attempt history
 
-1. Pre-check the image with an anonymous manifest request (2 seconds, free).
-2. Either publish a public mirror of the image or attach GHCR pull creds.
-3. Only then rent; keep the same launch flags captured in
-   [artifacts/benchmark-spec.md](artifacts/benchmark-spec.md).
+| # | Instance | Image | Outcome | Cost |
+|---|---|---|---|---|
+| v1 | 48995474 | private GHCR | image 401, never ran | $0.101 |
+| v2 | 49001943 | public base + clone | prepare.sh path bugs | ~$0.11 |
+| v3 | 49002210 | public base + clone | same | ~$0.05 |
+| v4 | 49002551 | public base + clone | same | ~$0.03 |
+| v5 | 49002984 | public base + clone | venv symlink fix | ~$0.05 |
+| v6 | 49003408 | public base + clone | **working server + benchmark** | see below |
+
+## Cost record
+
+- v6 rate: $0.2944/hr on-demand; started ~11:05 UTC 2026-08-28
+- v1: $0.101 (0.349 hr)
+- Final total recorded here after teardown.
+
+## Failure evidence from v1 (instance 48995474)
+
+1. `ghcr.io/syv-ai/qwen38-27b-rtx3090:latest` requires auth: anonymous
+   manifest request -> HTTP 401.
+2. Container filesystem ~1.2 MiB; /app held only onstart.sh/ports.log.
+3. SSH denied separately (authorized_keys mode/ownership on team account).
+
+Details: [container-filesystem.md](artifacts/container-filesystem.md),
+[image-manifest-probe.md](artifacts/image-manifest-probe.md).

@@ -1,0 +1,10 @@
+(EngineCore) reserved 5.2 GiB memory for KV Cache as specified by kv_cache_memory_bytes config and skipped memory profiling. This does not respect the gpu_memory_utilization config.
+(EngineCore) GPU KV cache size: 69,758 tokens
+(EngineCore) Capturing CUDA graphs (PIECEWISE): 4/4
+(EngineCore) Capturing CUDA graphs (FULL): 1/1
+(EngineCore) Capturing model for DFlash2 speculator...
+(EngineCore) Capturing dflash2 CUDA graphs (FULL): 1/1
+(EngineCore) init engine (profile, create kv cache, warmup model) took 165.47 s (compilation: 75.51 s)
+(EngineCore) /bin/sh: 1: /usr/local/cuda/bin/nvcc: not found ... falling back to torch.topk
+(APIServer) SpecDecoding metrics: Mean acceptance length: 3.38, Accepted: 543, Drafted: 1596, Per-position acceptance rate: 0.789, 0.539, 0.368, 0.250, 0.184, 0.145, 0.105, Avg Draft acceptance rate: 34.0%
+(APIServer) Engine 000: Avg generation throughput windows: 76.8 / 25.6 tokens/s
