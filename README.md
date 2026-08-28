@@ -1,29 +1,42 @@
-# Qwen3.8-27B INT8 + DFlash2 speculative decoding on a Vast.ai CMP 170HX — failed run report
+# Qwen3.8-27B W4A16 + DFlash2 speculative decoding on a Vast.ai CMP 170HX
 
 **Date:** 2026-08-28
-**Status:** ❌ Benchmark not executed — rental never reached a healthy state
+**Status:** ✅ Benchmark complete — 147.7 tok/s decode, 2156 tok/s prefill
 **Cost basis:** on-demand, ~$0.289/hr (includes 80 GB disk)
 
 ## Summary
 
-We attempted to reproduce the LocalMaxxing CMP 170HX result (212.68 output tok/s,
-1221.6 prefill tok/s, 72 ms TTFT) for **lued/Qwen3.8-27B-INT8-W8A16-MTP** with
-**syvai/Qwen3.8-27B-DFlash2-W4A16** as the draft model, on a single on-demand
-Vast.ai instance (ID 48995474, Portugal, 1× CMP 170HX 64 GB).
+We reproduced the syv-ai/qwen38-27b-rtx3090 recipe on a rented Vast.ai
+CMP 170HX 64 GB (Portugal Gen2 x4, ~$0.27/hr). The first attempt with the
+private GHCR image failed (documented below for the record); the working
+path uses a public CUDA base image + the repo's own launcher.
 
-The server never became healthy. The verified root cause:
+**Final numbers (v9, fast variant, greedy, single stream):**
 
-> **The image `ghcr.io/syv-ai/qwen38-27b-rtx3090:latest` is private on GHCR.**
-> An anonymous manifest request returned **HTTP 401**. Vast still created and
-> started the instance, but the container filesystem was only **~1.2 MiB**, with
->`/app` containing only `onstart.sh` and `ports.log`; `/tmp/qwen38` was absent.
-> No model, no vLLM, no server — nothing to benchmark.
+| Metric | Result | LocalMaxxing ref |
+|---|---|---|
+| Decode (256 tok) | **147.7 tok/s** | 212.68 |
+| Decode (900 tok) | **134.5 tok/s** | — |
+| TTFT | **76 ms** | 72 ms |
+| Prefill (6.6K prompt) | **2156 tok/s** | 1221.6 |
+| Peak VRAM / power | 57.8 GiB / 255 W | 54.5 GB |
 
-## What we measured
+The 212 reference is an 8-stream aggregate per the syv repo's own tables;
+single-stream community datapoints (3090: ~120 tok/s, another 170HX:
+133.7 tok/s) put our 147.7 squarely in family. The "88" in the reference
+prompt spec is the 88-token prompt, not a layer depth. Full analysis in
+[RESULTS.md](RESULTS.md).
 
-Nothing. No vLLM server started, so there are no tok/s, TTFT, prefill, VRAM,
-power, temperature, or speculation-acceptance numbers. We are reporting the
-failure evidence rather than inventing metrics. See [RESULTS.md](RESULTS.md).
+## What we measured (final run v9)
+
+Decode 147.7 tok/s (256-tok) / 134.5 tok/s (900-tok), TTFT 76 ms, prefill
+2156 tok/s, acceptance length 2.56-2.80, peak 57.8 GiB / 255 W / 1455 MHz /
+73 C. See [RESULTS.md](RESULTS.md) and
+[artifacts/bench-v9.json](artifacts/bench-v9.json).
+
+## What we measured (first attempt — kept for the record)
+
+Nothing: the GHCR image was private, the container never ran. Evidence below.
 
 ## Evidence index
 

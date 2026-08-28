@@ -1,7 +1,7 @@
 # RESULTS — Qwen3.8-27B + DFlash2 on a rented CMP 170HX
 
 **Date:** 2026-08-28
-**Working instance:** Vast.ai 49003408 (`qwen38-cmp170hx-v6`), on-demand
+**Working instance:** Vast.ai 49011536 (`qwen38-v9c`), on-demand
 **Earlier failure:** instance 48995474 — private GHCR image, documented below
 
 ## Bottom line
@@ -10,12 +10,24 @@ The stack **works** on the CMP 170HX: public CUDA base image + syv-ai repo +
 vLLM 0.27.1 + DFlash2 (7 draft tokens) served the model and survived a
 controlled benchmark. Measured, single request, greedy, streaming:
 
-| Metric | This run | LocalMaxxing reference | Delta |
+| Metric | v9 (fast variant) | v6/v8 (base target) | LocalMaxxing reference |
 |---|---|---|---|
-| Output tok/s (decode) | **43.3–47.5** (config-dep.) | 212.68 | **4.5–4.9x slower** |
-| TTFT (88-tok prompt) | **517–621 ms** | 72 ms | 7–8.6x slower |
-| Prefill tok/s (8K prompt) | **1705–1712** | 1221.6 | **1.4x faster** |
-| Mean acceptance length | **3.38** | — | DFlash2 active |
+| Output tok/s (256-tok gen) | **147.7** | 43.3–47.5* | 212.68 |
+| Output tok/s (900-tok gen) | **134.5** | — | — |
+| TTFT (11-tok prompt) | **76 ms** | 517–621 ms* | 72 ms |
+| Prefill tok/s (6.6K prompt) | **2156** | 1705–1712 | 1221.6 |
+| Mean acceptance length | **2.56–2.80** | 2.51–3.38 | — |
+| Peak GPU | 255 W, 1455 MHz, 57.8 GiB | — | — |
+
+\*v6/v8 counted SSE events as tokens; with speculative decoding each event
+carries ~2.5-3 tokens, so those numbers understate real throughput by roughly
+the acceptance length. v9 counts `usage.completion_tokens`.
+
+v9 decode (147.7 tok/s) matches the syv repo's own community 170HX datapoint
+(133.7 tok/s median, 3x900 tok, greedy, fast target) and the 3090's ~120-133
+tok/s single-stream. The repo's tables show 212 is an **8-stream aggregate**,
+not single-stream; single-stream on a 3090 is ~120 tok/s. Against that
+yardstick the 170HX at 147.7 tok/s is fully explained.
 | KV cache tokens | 69,758 (v6) / GPU_UTIL-sized 33.6 GiB (v8) | ~65,536 context | fine |
 
 Full context is usable in v8: the empty `KV_MEM=` disables the 24-GB-card
@@ -28,6 +40,27 @@ acceptance length 3.38, per-position acceptance
 for both model and drafter.
 
 ## Root causes of the 4.5x gap (verified from logs, not speculation)
+
+(Superseded by v9 — see "v9: what actually closed the gap" below. The three
+items here were real but secondary.)
+
+## v9: what actually closed the gap (verified from logs)
+
+1. **The fast variant was never built in v6-v8.** `docker/prepare.sh`
+   `cd /app` then calls `prepare/quant_lm_head.py`; our clone lives in
+   `/app/qwen-serving`, so prepare.sh died at `can't open file
+   '/app/prepare/quant_lm_head.py'` — silently (`|| echo continue`). No
+   int8/packed lm_head, no int8 embed/MTP, and crucially no
+   **fast variant** (int4-GPTQ lm_head/MTP, +15% decode). v9 symlinks
+   `/app/prepare` -> the clone's prepare dir; the log then shows every
+   quantization step completing and `FAST-VARIANT-PRESENT`.
+2. **Token counting was wrong.** v6/v8/v7e counted SSE events. Spec decode
+   emits one event per accepted batch (~2.5-3 tokens). v9 uses
+   `stream_options: {include_usage: true}` and `usage.completion_tokens`.
+   This alone turns 43.3 "tok/s" into ~110-130 real tok/s.
+3. **flashinfer topk fixed.** v8's JIT failed (`curand.h: No such file`)
+   -> torch.topk fallback. v9 symlinks curand.h from the pip nvidia cu13
+   package into /usr/local/cuda/include and clears the flashinfer cache.
 
 1. **KV pool mis-sized.** The launcher pinned `KV_MEM=5583457484` (5.2 GiB),
    a 24 GB-card value from the syv repo defaults. The log confirms:
@@ -75,6 +108,24 @@ compute-bound and this host's 170HX handles it well; decode remains
 bandwidth-bound at ~1/4 of reference. Raw:
 [bench-v8.json](artifacts/bench-v8.json).
 
+v9 (W4A16 + **fast variant** + curand.h fix + correct token counting,
+instance 49011536): decode **147.7 tok/s** (256-tok) / **134.5 tok/s**
+(900-tok), TTFT **76 ms**, prefill **2156 tok/s** (6,603-tok prompt).
+Peak: 57.8 GiB VRAM, 255 W, 1455 MHz SM clock, 73 C, 100% util.
+Acceptance length 2.56-2.80. Raw: [bench-v9.json](artifacts/bench-v9.json),
+samples: [bench-v9-samples.jsonl](artifacts/bench-v9-samples.jsonl),
+full instance log: [v9-full.log](artifacts/v9-full.log).
+
+### v9 benchmark samples (greedy, streaming, usage-token-counted)
+
+| Run | i | TTFT | total | out tok | tok/s |
+|---|---|---|---|---|---|
+| decode256 | 1 | 75.9 ms | 1.803 s | 256 | 147.6 |
+| decode256 | 2 | 75.7 ms | 1.804 s | 256 | 147.6 |
+| decode900 | 1 | 93.4 ms | 6.779 s | 900 | 134.5 |
+| decode900 | 2 | 93.0 ms | 6.797 s | 900 | 134.1 |
+| prefill 6.6K | 1 | 3062.8 ms | 3.126 s | 8 | 2156 (prefill) |
+
 Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 [bench-v6-run2.json](artifacts/bench-v6-run2.json),
 [bench-v6-run3.json](artifacts/bench-v6-run3.json).
@@ -90,6 +141,9 @@ Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 | v5 | 49002984 | public base + clone | venv symlink fix | ~$0.05 |
 | v6 | 49003408 | public base + clone | **working server + benchmark** | see below |
 | v7e | 49006974 | public base + clone, W8A16 | working, 31.6 tok/s | ~$0.06 |
+| v8 | 49008211 | public base + clone | working, 43.3 tok/s (event-counted) | ~$0.06 |
+| v9a/v9b | 49011398/49011444 | create returned stopped | destroyed immediately | $0 |
+| v9c | 49011536 | public base + clone, prepare fix | **147.7 tok/s, gap closed** | see below |
 
 ## Cost record
 
