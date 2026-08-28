@@ -126,6 +126,36 @@ full instance log: [v9-full.log](artifacts/v9-full.log).
 | decode900 | 2 | 93.0 ms | 6.797 s | 900 | 134.1 |
 | prefill 6.6K | 1 | 3062.8 ms | 3.126 s | 8 | 2156 (prefill) |
 
+## v9 settings audit vs the syv launcher (single-user/start_qwen.sh)
+
+Applied exactly as the repo intends (verified in the v9 server log, not just
+the script):
+
+- Fast variant model (`...W4A16-AutoRound-fast` — confirmed in the engine
+  init line) + W4A16 DFlash2 drafter, k=7
+- `CTX=fast`: FLASH_ATTN, bf16 KV, 65,536 context
+- Lookup-augmented drafting ON (log: "k=7 nmin=6 nmax=12 nstrong=6")
+- All 20 patches applied, incl. split-KV verify attention and the sm80
+  Marlin repack staging (auto-ON for compute capability 8.0)
+- Tool parser `qwen3_coder`, reasoning parser `qwen3`, mamba state fp16,
+  vision tower dropped (`--language-model-only`), async scheduling default,
+  `max_num_batched_tokens 2048`
+
+Three deliberate deviations:
+
+1. **`MAX_SEQS=1` vs his default 8** — pinned for a single-stream benchmark.
+   The syv tables show 212 tok/s is an 8-stream aggregate; this config would
+   queue 8 concurrent streams. Main knob to chase 212.
+2. **`GPU_UTIL=0.90` vs his 0.93** — his value tunes a 24 GB card's transient
+   margin; on 64 GB the difference is ~1 GB of unused headroom. Negligible.
+3. **`KV_MEM=` empty vs his pinned 5.2 GiB** — correct per his own guidance
+  (the pin is a 24-GB-card constant; issue #40 un-pins it on bigger cards).
+   Ours sized a 33.6 GiB pool holding the full 64K context.
+
+Known-benign warning: "Unknown vLLM environment variable
+VLLM_SPEC_DECODE_ATTN_QMAX" — that is the launcher's own variable, read by
+the patched spec-decode attention code; identical on the author's 3090.
+
 Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 [bench-v6-run2.json](artifacts/bench-v6-run2.json),
 [bench-v6-run3.json](artifacts/bench-v6-run3.json).
