@@ -1,0 +1,5 @@
+{"run": "warmup", "ttft_ms": 617.3, "total_s": 2.979, "output_tokens": 103, "output_tok_s": 43.19, "total_tok_s": 34.57}
+{"run": "run1", "ttft_ms": 620.2, "total_s": 2.976, "output_tokens": 103, "output_tok_s": 43.3, "total_tok_s": 34.61}
+{"run": "run2", "ttft_ms": 608.6, "total_s": 2.965, "output_tokens": 103, "output_tok_s": 43.28, "total_tok_s": 34.73}
+{"run": "run3", "ttft_ms": 602.3, "total_s": 2.959, "output_tokens": 103, "output_tok_s": 43.28, "total_tok_s": 34.81}
+{"summary": {"runs": 3, "mean_ttft_ms": 610.4, "mean_total_s": 2.967, "mean_output_tokens": 103.0, "mean_output_tok_s": 43.29, "mean_total_tok_s": 34.72}}

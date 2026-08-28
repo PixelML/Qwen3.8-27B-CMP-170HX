@@ -1,0 +1,4 @@
+{"run": "warmup", "prompt_tokens_reported": 8192, "latency_s": 4.79, "prefill_tok_s": 1710.3}
+{"run": "run1", "prompt_tokens_reported": 8192, "latency_s": 4.771, "prefill_tok_s": 1717.1}
+{"run": "run2", "prompt_tokens_reported": 8192, "latency_s": 4.838, "prefill_tok_s": 1693.2}
+{"summary": {"samples": 2, "mean_prefill_tok_s": 1705.2}}

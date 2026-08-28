@@ -12,11 +12,15 @@ controlled benchmark. Measured, single request, greedy, streaming:
 
 | Metric | This run | LocalMaxxing reference | Delta |
 |---|---|---|---|
-| Output tok/s | **47.2–47.5** | 212.68 | **4.5x slower** |
-| TTFT | **517–521 ms** | 72 ms | 7x slower |
-| Prefill tok/s | not isolated | 1221.6 | — |
+| Output tok/s (decode) | **43.3–47.5** (config-dep.) | 212.68 | **4.5–4.9x slower** |
+| TTFT (88-tok prompt) | **517–621 ms** | 72 ms | 7–8.6x slower |
+| Prefill tok/s (8K prompt) | **1705–1712** | 1221.6 | **1.4x faster** |
 | Mean acceptance length | **3.38** | — | DFlash2 active |
-| KV cache tokens | 69,758 | ~65,536 context | fine |
+| KV cache tokens | 69,758 (v6) / GPU_UTIL-sized 33.6 GiB (v8) | ~65,536 context | fine |
+
+Full context is usable in v8: the empty `KV_MEM=` disables the 24-GB-card
+5.2 GiB pin and lets GPU_UTIL=0.90 size the pool (33.63 GiB for KV), so the
+full 65,536-token context fits with headroom.
 
 DFlash2 is confirmed active: server-side SpecDecoding metrics show mean
 acceptance length 3.38, per-position acceptance
@@ -62,6 +66,14 @@ runs total. Protocol matches the LocalMaxxing reference shape.
 v7e (W8A16, official recipe): **31.6 tok/s, 608-621 ms TTFT**, acceptance 2.9.
 Raw: [bench-v7e.json](artifacts/bench-v7e.json). Attempt log:
 [attempt-history-v7.md](artifacts/attempt-history-v7.md).
+
+v8 (W4A16 + GPU_UTIL-sized KV pool, full 64K context): decode **43.3 tok/s /
+610 ms TTFT**, prefill **1705-1712 tok/s on an 8,192-token prompt** (1 output
+token, non-streaming, 2 samples each pass; repeat pass within 0.5%). The
+prefill number beats the reference's 1221.6 by 1.4x — prefill is
+compute-bound and this host's 170HX handles it well; decode remains
+bandwidth-bound at ~1/4 of reference. Raw:
+[bench-v8.json](artifacts/bench-v8.json).
 
 Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 [bench-v6-run2.json](artifacts/bench-v6-run2.json),
