@@ -32,9 +32,11 @@ for both model and drafter.
 2. **flashinfer topk fell back to torch.topk.** `/usr/local/cuda/bin/nvcc`
    missing in the base image; flashinfer JIT could not compile its fast
    topk. The repo docs say flashinfer makes the DFlash2 selector ~2x faster.
-3. **W4A16 requant vs reference W8A16.** prepare.sh requantizes the INT8
-   checkpoint to W4A16 for 24 GB cards. The reference used W8A16 — different
-   kernel paths and possibly acceptance behavior.
+3. **W4A16 vs W8A16 — tested directly (v7e).** Serving the official W8A16
+   checkpoint dropped throughput to 31.6 tok/s (from 47.5 W4A16) and
+   acceptance length to 2.9 (from 3.38). The card is bandwidth-bound, so
+   denser weights are strictly slower. The reference's 212 tok/s cannot be
+   explained by weight precision alone on this host.
 
 ## v6 configuration
 
@@ -57,6 +59,10 @@ runs total. Protocol matches the LocalMaxxing reference shape.
 | 2 (eos honored) | 47.35 | 521.2 ms | 103 |
 | 3 (repeat) | 47.22 | 517.5 ms | 103 |
 
+v7e (W8A16, official recipe): **31.6 tok/s, 608-621 ms TTFT**, acceptance 2.9.
+Raw: [bench-v7e.json](artifacts/bench-v7e.json). Attempt log:
+[attempt-history-v7.md](artifacts/attempt-history-v7.md).
+
 Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 [bench-v6-run2.json](artifacts/bench-v6-run2.json),
 [bench-v6-run3.json](artifacts/bench-v6-run3.json).
@@ -71,6 +77,7 @@ Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 | v4 | 49002551 | public base + clone | same | ~$0.03 |
 | v5 | 49002984 | public base + clone | venv symlink fix | ~$0.05 |
 | v6 | 49003408 | public base + clone | **working server + benchmark** | see below |
+| v7e | 49006974 | public base + clone, W8A16 | working, 31.6 tok/s | ~$0.06 |
 
 ## Cost record
 
