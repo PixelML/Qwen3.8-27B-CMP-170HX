@@ -6,6 +6,75 @@
 
 ## Bottom line
 
+## v10 — Ninfer trick A/B (2026-08-28, instance 49049977)
+
+Question: do the two Ninfer config tricks from the Reddit 5090 post transfer
+to the syv vLLM stack on a 170HX? Four boots, one rental, same protocol as
+v9 (streaming, `usage.completion_tokens`, temp 0, warmup 1 + 3 samples):
+
+| Boot | Config | decode256 tok/s | decode900 tok/s | TTFT ms | prefill tok/s |
+|---|---|---|---|---|---|
+| A | dflash2 k=7, bf16 64k (v9 config re-run) | **140.5** | 126.6 | 107 | 2161 |
+| B | mtp k=4, truncated 40k draft head | 133.1 | 119.8 | 81 | 2155 |
+| C | mtp k=4, **MTP_DRAFT_VOCAB=0** (full-head draft) | 119.2 | 113.1 | 67 | 2145 |
+| D | dflash2 k=7, **fp8 KV 131k ctx** | 135.8 | 121.2 | 110 | 1741 |
+
+**lm-head-draft hurts here: −10.4% decode** (C vs B, 119.2 vs 133.1). The
+truncated 40k-row draft head is the better design on this stack — the full
+248k head's wider acceptance does not pay for its 6× wider draft GEMM. Do
+not port Ninfer's `--lm-head-draft` to vLLM.
+
+**fp8-KV long context costs 3.4% decode / 19.5% prefill** vs bf16 and buys
+131k context on one card (D vs A). Ninfer's `--host-kv-mib` trick itself is
+unnecessary at 64 GB — everything fits in VRAM.
+
+Cross-node note: boot A re-measured the v9 config at 140.5 vs v9's 147.7
+tok/s on a different physical card. Same config, same protocol — treat ~5%
+as node-to-node spread when comparing runs.
+
+Raw JSON: `artifacts/bench-v10.json`, samples `artifacts/bench-v10-samples.jsonl`,
+onstart `artifacts/onstart-v10.sh`.
+
+## v11 — Ithrial's Ninfer sm_80 fork (2026-08-28, instance 49052618)
+
+Sean flagged [`Ithrial/ninfer-cmp170hx`](https://github.com/Ithrial/ninfer-cmp170hx) —
+a fork of Ninfer retargeted from Blackwell to sm_80 (Ampere). Tested head-to-head
+against the v10 boots on the same offer (48829277, same physical node as boot A):
+native cmake build with `CMAKE_CUDA_ARCHITECTURES=80` (not
+`NINFER_CUDA_ARCHITECTURES` — that one is Dockerfile sugar), fork's own
+`neroued/Qwen3.8-27B-NInfer` artifact, served with
+`--spec mtp --draft-tokens 3 --lm-head-draft --kv-dtype int8 --max-context 65536`
+to match the vLLM CTX=fast setup.
+
+**It builds and runs.** The scary-looking stall at `[237/245]`
+(`nvfp4_small_t.cu`) is real compile time, not a hang — that one file takes
+~20 minutes of template instantiation; the rest of the build is quick. Serve
+boots, the 16.96 GiB artifact loads, health gate passes, bench completes.
+
+| Metric (same node, same protocol) | vLLM DFlash2 k=7 (v10 boot A) | Ninfer fork (v11) |
+|---|---|---|
+| decode256 tok/s | **140.5** | 39.6 |
+| decode900 tok/s | **126.6** | 41.2 |
+| TTFT | 107 ms | **1.8 ms** |
+| prefill (6.6K prompt) | 2,161 tok/s | **419,177 tok/s** |
+| GPU at peak | 262 W / 57.6 GiB | 247 W / 20.1 GiB |
+
+**Verdict: the fork is real but not competitive for decode.** Its sm_80
+groupwise-int + w8 kernels land 3.5× behind our DFlash2 stack on single-stream
+decode. What is genuinely impressive is the prefill path — 194× our vLLM
+prefill and near-zero TTFT. If anything is worth porting from the fork it is
+that prefill kernel design, not the decode tricks.
+
+Caveats: bench went through `/v1/chat/completions` (the fork has no
+`/v1/completions` route) so the prompt is 63 chat-templated tokens vs vLLM's
+11 raw tokens; the fork silently ignores `ignore_eos` so decode runs can stop
+at EOS (formula unchanged, still comparable); acceptance metrics are not
+exposed in the serve log.
+
+Raw JSON: `artifacts/bench-v11-ninfer.json`, samples
+`artifacts/bench-v11-ninfer-samples.jsonl`, onstart
+`artifacts/onstart-v11-ninfer.sh`, bench harness `artifacts/bench-ninfer-v11.py`.
+
 The stack **works** on the CMP 170HX: public CUDA base image + syv-ai repo +
 vLLM 0.27.1 + DFlash2 (7 draft tokens) served the model and survived a
 controlled benchmark. Measured, single request, greedy, streaming:

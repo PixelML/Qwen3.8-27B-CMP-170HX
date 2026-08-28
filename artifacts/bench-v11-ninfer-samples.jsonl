@@ -1,0 +1,14 @@
+{"engine": "ninfer", "bench": "v11", "base_url": "http://127.0.0.1:18020", "model": "qwen3.8-27b"}
+{"engine": "ninfer", "run": "decode256", "i": 0, "ttft_ms": 1.9, "total_s": 6.437, "out_tok": 256, "decode_tok_s": 39.63, "prompt_tokens": 63}
+{"engine": "ninfer", "run": "decode256", "i": 1, "ttft_ms": 1.8, "total_s": 6.438, "out_tok": 256, "decode_tok_s": 39.62, "prompt_tokens": 63}
+{"engine": "ninfer", "run": "decode256", "i": 2, "ttft_ms": 1.8, "total_s": 6.439, "out_tok": 256, "decode_tok_s": 39.62, "prompt_tokens": 63}
+{"engine": "ninfer", "summary": "decode256", "mean_ttft_ms": 1.8, "mean_total_s": 6.438, "mean_out_tok": 256.0, "decode_tok_s": 39.62, "prompt_tokens": 63, "prefill_tok_s": 34718.5}
+{"engine": "ninfer", "run": "decode900", "i": 0, "ttft_ms": 2.0, "total_s": 21.828, "out_tok": 900, "decode_tok_s": 41.19, "prompt_tokens": 63}
+{"engine": "ninfer", "run": "decode900", "i": 1, "ttft_ms": 1.6, "total_s": 21.827, "out_tok": 900, "decode_tok_s": 41.19, "prompt_tokens": 63}
+{"engine": "ninfer", "run": "decode900", "i": 2, "ttft_ms": 1.6, "total_s": 21.83, "out_tok": 900, "decode_tok_s": 41.19, "prompt_tokens": 63}
+{"engine": "ninfer", "summary": "decode900", "mean_ttft_ms": 1.7, "mean_total_s": 21.828, "mean_out_tok": 900.0, "decode_tok_s": 41.19, "prompt_tokens": 63, "prefill_tok_s": 36707.1}
+{"engine": "ninfer", "run": "prefill_long", "i": 0, "ttft_ms": 15.7, "total_s": 0.219, "out_tok": 8, "decode_tok_s": 34.41, "prompt_tokens": 6654}
+{"engine": "ninfer", "run": "prefill_long", "i": 1, "ttft_ms": 16.2, "total_s": 0.22, "decode_tok_s": 34.41, "prompt_tokens": 6654}
+{"engine": "ninfer", "run": "prefill_long", "i": 2, "ttft_ms": 15.8, "total_s": 0.219, "out_tok": 8, "decode_tok_s": 34.42, "prompt_tokens": 6654}
+{"engine": "ninfer", "summary": "prefill_long", "mean_ttft_ms": 15.9, "mean_total_s": 0.219, "mean_out_tok": 8.0, "decode_tok_s": 34.41, "prompt_tokens": 6654, "prefill_tok_s": 419176.9}
+{"engine": "ninfer", "gpu_peak": {"util": 100.0, "power": 247.42, "mem": 20110.0, "clk": 1410.0, "temp": 72.0}}

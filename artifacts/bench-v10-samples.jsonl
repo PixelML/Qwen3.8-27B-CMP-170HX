@@ -1,0 +1,22 @@
+{"boot": "C", "prompt_tokens": {"story": 11, "long": 6603}}
+{"boot": "C", "run": "decode256", "i": 0, "ttft_ms": 65.5, "total_s": 2.205, "out_tok": 256, "decode_tok_s": 119.21}
+{"boot": "C", "run": "decode256", "i": 1, "ttft_ms": 66.0, "total_s": 2.205, "out_tok": 256, "decode_tok_s": 119.22}
+{"boot": "C", "run": "decode256", "i": 2, "ttft_ms": 69.4, "total_s": 2.208, "out_tok": 256, "decode_tok_s": 119.24}
+{"boot": "C", "run": "decode900", "i": 0, "ttft_ms": 83.8, "total_s": 8.034, "out_tok": 900, "decode_tok_s": 113.08}
+{"boot": "C", "run": "decode900", "i": 1, "ttft_ms": 86.4, "total_s": 8.036, "out_tok": 900, "decode_tok_s": 113.08}
+{"boot": "C", "run": "decode900", "i": 2, "ttft_ms": 83.7, "total_s": 8.026, "out_tok": 900, "decode_tok_s": 113.19}
+{"boot": "C", "run": "prefill_long", "i": 0, "ttft_ms": 3074.2, "total_s": 3.139, "out_tok": 8, "decode_tok_s": 107.41}
+{"boot": "C", "run": "prefill_long", "i": 1, "ttft_ms": 3079.4, "total_s": 3.145, "out_tok": 8, "decode_tok_s": 107.35}
+{"boot": "C", "run": "prefill_long", "i": 2, "ttft_ms": 3080.7, "total_s": 3.146, "out_tok": 8, "decode_tok_s": 107.75}
+{"boot": "C", "gpu_peak": {"util": 100.0, "power": 256.1, "mem": 57956.0, "clk": 1410.0, "temp": 69.0}}
+{"boot": "D", "prompt_tokens": {"story": 11, "long": 6603}}
+{"boot": "D", "run": "decode256", "i": 0, "ttft_ms": 109.8, "total_s": 1.987, "out_tok": 256, "decode_tok_s": 135.85}
+{"boot": "D", "run": "decode256", "i": 1, "ttft_ms": 111.2, "total_s": 1.989, "out_tok": 256, "decode_tok_s": 135.79}
+{"boot": "D", "run": "decode256", "i": 2, "ttft_ms": 108.6, "total_s": 1.986, "out_tok": 256, "decode_tok_s": 135.8}
+{"boot": "D", "run": "decode900", "i": 0, "ttft_ms": 108.0, "total_s": 7.525, "out_tok": 900, "decode_tok_s": 121.21}
+{"boot": "D", "run": "decode900", "i": 1, "ttft_ms": 109.0, "total_s": 7.526, "out_tok": 900, "decode_tok_s": 121.21}
+{"boot": "D", "run": "decode900", "i": 2, "ttft_ms": 108.6, "total_s": 7.527, "out_tok": 900, "decode_tok_s": 121.19}
+{"boot": "D", "run": "prefill_long", "i": 0, "ttft_ms": 3794.9, "total_s": 3.868, "out_tok": 8, "decode_tok_s": 95.53}
+{"boot": "D", "run": "prefill_long", "i": 1, "ttft_ms": 3793.7, "total_s": 3.867, "out_tok": 8, "decode_tok_s": 95.68}
+{"boot": "D", "run": "prefill_long", "i": 2, "ttft_ms": 3790.0, "total_s": 3.863, "out_tok": 8, "decode_tok_s": 96.18}
+{"boot": "D", "gpu_peak": {"util": 100.0, "power": 261.61, "mem": 57562.0, "clk": 1410.0, "temp": 68.0}}
