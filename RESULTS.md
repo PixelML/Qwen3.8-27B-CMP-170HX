@@ -272,8 +272,13 @@ acceptance 16-29% per request - in family with v9c (2.56-2.80). Peak card
 power 185-223 W instantaneous (180 W cap with transients), 100% util,
 51 C core / 52-61 C mem, no Xid, no power-brake. Weights:
 /library/models/qwen38/bench-2026-08-29 (W4A16-AutoRound-fast + DFlash2
-drafter). Harness: /tmp/qwen38-three-card-run/{run-chimera-card.sh,
-bench-usage.py} (v9-usage-token-counted protocol, identical to v9c).
+drafter). Harness: [scripts/run-chimera-card.sh](scripts/run-chimera-card.sh) +
+[scripts/bench-usage.py](scripts/bench-usage.py) (v9-usage-token-counted
+protocol, identical to v9c). Raw evidence archived per card:
+[artifacts/local-rerun-gpu0](artifacts/local-rerun-gpu0/bench.jsonl) /
+[gpu1](artifacts/local-rerun-gpu1/bench.jsonl) /
+[gpu2](artifacts/local-rerun-gpu2/bench.jsonl) - bench.jsonl, metadata.txt,
+specdec.log, nvidia-after.txt in each.
 
 **Verdict: recipe fully reproduced at home. The earlier "power envelope"
 explanation was wrong - the 180 W cap costs only ~5% decode vs 255 W.
