@@ -1,0 +1,3 @@
+# Local run output only — never committed (see receipts/README.md)
+runs-local/
+__pycache__/
