@@ -244,7 +244,7 @@ Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 | v9a/v9b | 49011398/49011444 | create returned stopped | destroyed immediately | $0 |
 | v9c | 49011536 | public base + clone, prepare fix | **147.7 tok/s, gap closed** | see below |
 
-## Local rerun - chimera 3x CMP 170HX (2026-08-29)
+## Local rerun - chimera 3x CMP 170HX (2026-08-29/30)
 
 Same v9 recipe rerun on our own 3-card box, power-capped at **180 W**
 (VAST ran 255 W), one card. Weights rebuilt once to
@@ -252,20 +252,36 @@ Same v9 recipe rerun on our own 3-card box, power-capped at **180 W**
 syv post-quant chain + DFlash2 drafter), stored on the 8.4 TB library
 NFS for reuse.
 
-| metric | local (180 W) | VAST v9 (255 W) | ratio |
-|---|---|---|---|
-| decode 256 tok | **47.0 tok/s** | 147.7 | 3.1x gap |
-| prefill 8192 tok | **1927.6 tok/s** | 2156 (6.6K) | 1.12x gap |
-| TTFT | 191 ms | 76 ms | - |
-| acceptance length | 2.85-3.32 | 2.56-2.80 | better locally |
+**Correction (2026-08-30):** an earlier writeup reported 47.0 tok/s from a
+single-card run. That run overlapped the DSV4 docker build on the host and
+pinned a KV slab (KV_MEM set), so it under-measured. A clean rerun of the
+same v9 recipe - KV_MEM empty, GPU_UTIL 0.90, host idle - ran once per card
+sequentially (gpu0 02:30, gpu1 02:40, gpu2 02:43 UTC). Those numbers
+supersede 47.0.
 
-Prefill lands within 12% of VAST despite the lower cap (bandwidth-bound).
-Speculative acceptance is actually better locally (40960-token draft vocab
-active). The decode gap tracks the power envelope: VAST held 1455 MHz
-under spec load, this box holds 1140-1275 MHz at 99% util with no
-power-brake or thermal flags. **Recipe reproduced; delta is the 180 W
-envelope, not the stack.** Run 1 (lued INT8-W8A16, wrong checkpoint,
-caught mid-run): 30.9 tok/s / 1620 prefill, kept for the record.
+| card | decode 256 tok | decode 900 tok | TTFT | prefill 6.6K | SM peak |
+|---|---|---|---|---|---|
+| gpu0 | 135.3 tok/s | 121.3 tok/s | 201 ms | 1957 tok/s | 1395 MHz |
+| gpu1 | **140.3 tok/s** | 124.8 tok/s | 190 ms | 1955 tok/s | 1500 MHz |
+| gpu2 | 133.6 tok/s | 119.9 tok/s | 181 ms | 1926 tok/s | 1395 MHz |
+
+vs VAST v9 at 255 W: decode 147.7 -> best local 140.3 (**95% of VAST at
+180 W, 71% of VAST's power**); prefill 2156 -> ~1955 (91%); TTFT 76 ->
+~190 ms (PCIe Gen2 x4 host link). Acceptance length 2.14-3.00, draft
+acceptance 16-29% per request - in family with v9c (2.56-2.80). Peak card
+power 185-223 W instantaneous (180 W cap with transients), 100% util,
+51 C core / 52-61 C mem, no Xid, no power-brake. Weights:
+/library/models/qwen38/bench-2026-08-29 (W4A16-AutoRound-fast + DFlash2
+drafter). Harness: /tmp/qwen38-three-card-run/{run-chimera-card.sh,
+bench-usage.py} (v9-usage-token-counted protocol, identical to v9c).
+
+**Verdict: recipe fully reproduced at home. The earlier "power envelope"
+explanation was wrong - the 180 W cap costs only ~5% decode vs 255 W.
+The 47.0 number was host contention + pinned KV, not silicon.**
+
+Earlier depressed runs (kept for the record): 47.0 tok/s / 1927.6 prefill
+(contention + pinned KV); run 1 was 30.9 tok/s (lued INT8-W8A16, wrong
+checkpoint).
 
 DeepSeek-V4-Flash-0731 on all 3 cards is split to its own repo:
 [DeepSeek-V4-Flash-0731-CMP-170HX](https://github.com/PixelML/DeepSeek-V4-Flash-0731-CMP-170HX)
