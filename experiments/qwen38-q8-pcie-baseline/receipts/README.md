@@ -63,7 +63,7 @@ step that can introduce violations, which is why the pre-commit checklist in
 
 ## Negative / partial runs
 
-If a topology fails or is interrupted, its receipt still gets committed with
+If a phase fails or is interrupted, its receipt still gets committed with
 the same naming scheme. Do not "retry until clean" and commit only the good
 one: every attempt that produced receipts is preserved, and the summary
 discloses how many attempts exist.

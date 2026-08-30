@@ -1,4 +1,4 @@
-# METHODOLOGY — Qwen3.8-27B Q8 PCIe scaling baseline
+# METHODOLOGY — Qwen3.8-27B Q8 whole-node throughput baseline
 
 Complete measurement contract for the fixed baseline round described in
 `PLAN.md`. If this document and an implementation disagree, this document
@@ -29,7 +29,7 @@ Prompt identity: deterministic public text, sized to nominal 1,024 / 8,192 /
 nominal bucket is a *label*; the exact per-request `usage.prompt_tokens` is
 recorded and used in every computed metric.
 
-Phase policy: per topology, per bucket — the first request after the health
+Phase policy: per phase, per bucket — the first request after the health
 gate and settle delay is the **cold** measurement (first-touch weight
 page-ins, KV pool allocation, compile caches); the next 3 byte-identical
 requests are **warm repetitions**. The designated cold measurement is
@@ -39,7 +39,7 @@ re-rolls.
 ## 2. Aggregation rules
 
 - Headline numbers are means over the successful **warm** repetitions of a
-  (topology, bucket) cell. Cold measurements are reported separately and
+  (phase, bucket) cell. Cold measurements are reported separately and
   never averaged into warm aggregates.
 - Min–max spread across warm repetitions accompanies every mean (charts
   render it as a band/error bars).
@@ -49,17 +49,24 @@ re-rolls.
 - A cell with 0 successful warm reps contributes no aggregate at all — the
   failed rows remain visible in the CSV with their error class and empty
   metrics.
-- Cross-topology comparisons use the same bucket and phase only.
+- Cross-phase comparisons (control vs node4) use the same bucket and phase only.
 - Resource aggregates (peak/mean power, peak memory, peak utilization,
   peak temperature, nonzero-throttle sample count, min effective PCIe
-  link gen/width) are computed per run from the paired monitor JSONL and
-  attached to every row of that run.
+  link gen/width) are computed per phase from the paired monitor JSONL and
+  attached to every row of that phase.
+- node4 whole-node aggregate: within one shared request window (identical
+  bucket/phase/repetition across the four workers), node throughput equals
+  the sum of worker generation rates divided by the shared window duration;
+  it is reported per bucket in `node_aggregate_output_tok_s`.
+- Fairness: per-window min, max, and percent spread across the four workers
+  accompany every node4 mean; interference is the per-bucket ratio of node
+  aggregate throughput to 4x the single-card control.
 - Aggregate throughput across cells (e.g. a single "the 4-card number") is
   not defined by this methodology; always report per bucket.
 
 ## 3. Quality-smoke method and limitations
 
-Method: after each topology completes, read the recorded `response_text`
+Method: after each phase completes, read the recorded `response_text`
 for the 32,768-token bucket's warm repetitions end-to-end and check:
 
 1. determinism — warm repetitions at temperature 0 should be byte-identical
@@ -84,7 +91,7 @@ Recorded per round in `MANIFEST.md`:
 - TODO-at-runtime fields: model revision, resolved checkpoint hash(es),
   serving recipe commit, package provenance (image or environment),
   effective per-card PCIe link state from the monitor output, actual UTC
-  timestamps for each topology run, and any deviations.
+  timestamps for each phase run, and any deviations.
 
 The operator lease acknowledgement mechanism (env var contract in
 `run_matrix.sh`) is recorded as acknowledged/mechanism — the value itself is

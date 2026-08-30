@@ -29,6 +29,7 @@ import os
 import signal
 import socket
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -44,6 +45,7 @@ TOP_P = 1.0
 SEED = 1234
 SERVED_MODEL_NAME_DEFAULT = "qwen3.8-27b-q8"
 CHARS_PER_TOKEN_HEURISTIC = 4.0  # sizing heuristic only; usage object is truth
+NODE_WORKER_IDS: tuple[int, ...] = (1, 2, 3, 4)
 
 # Public, deterministic, content-free prompt text (no private data).
 PROMPT_SENTENCE = (
@@ -84,6 +86,155 @@ def build_prompt(nominal_tokens: int) -> str:
     target_chars = int(nominal_tokens * CHARS_PER_TOKEN_HEURISTIC)
     repeats = target_chars // len(PROMPT_SENTENCE) + 1
     return (PROMPT_SENTENCE * repeats)[:target_chars]
+
+
+def concurrent_node4_run(args: argparse.Namespace) -> int:
+    """Phase B (node4): identical requests on four card-local workers, in lockstep.
+
+    Buckets run strictly in ascending order; the four per-worker requests inside
+    one bucket start together (threading.Barrier) and finish before the next
+    bucket begins. The shared wall window makes per-card throughput directly
+    comparable and yields an honest whole-node aggregate. Cold/warm structure,
+    sampling, and token limits match the single-card control exactly.
+    """
+    out_path: Path = args.output
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = JsonlWriter(out_path)
+    worker_urls = [u.strip() for u in args.node4_urls.split(",") if u.strip()]
+    if len(worker_urls) != 4:
+        writer.close()
+        raise SystemExit("--node4-urls requires exactly 4 comma-separated base URLs")
+    endpoints = {
+        wid: (worker_urls[wid - 1], f"worker-{wid}")
+        for wid in NODE_WORKER_IDS
+    }
+    streamers = {
+        wid: (CompletionStreamer(url, args.api_key, args.model), label)
+        for wid, (url, label) in endpoints.items()
+    }
+    lock = threading.Lock()
+
+    def write(record: dict[str, object]) -> None:
+        with lock:
+            writer.write(record)
+
+    write(
+        {
+            "type": "run_start",
+            "schema_version": args.schema,
+            "run_id": args.run_id,
+            "card_count": 4,
+            "mode": "node4_card_local",
+            "started_at_utc": utc_now(),
+            "contract": {
+                "context_buckets_nominal": list(CONTEXT_BUCKETS),
+                "requested_output_tokens": REQUESTED_OUTPUT_TOKENS,
+                "temperature": TEMPERATURE,
+                "top_p": TOP_P,
+                "seed": SEED,
+                "warm_repetitions_target": args.warm_repetitions,
+                "cold_per_bucket": 1,
+                "speculative_decoding": "off",
+                "served_model_name": args.model,
+                "worker_endpoints": [label for _, label in endpoints.values()],
+            },
+        }
+    )
+
+    counts = {"cold_ok": 0, "warm_ok": 0, "cold_failed": 0, "warm_failed": 0}
+    status = "completed"
+    exit_code = 0
+
+    try:
+        for bucket in CONTEXT_BUCKETS:
+            prompt = build_prompt(bucket)
+            plan = [("cold", 0)] + [
+                ("warm", rep) for rep in range(1, args.warm_repetitions + 1)
+            ]
+            for phase, repetition in plan:
+                barrier = threading.Barrier(4, timeout=120)
+                window_started = time.perf_counter()
+
+                def worker_slot(worker_id: int) -> None:
+                    streamer, label = streamers[worker_id]
+                    row: dict[str, object] = {
+                        "type": "request",
+                        "schema_version": args.schema,
+                        "run_id": args.run_id,
+                        "card_count": 1,
+                        "mode": "node4_card_local",
+                        "worker_id": worker_id,
+                        "worker_endpoint": label,
+                        "context_bucket": str(bucket),
+                        "nominal_prompt_tokens": bucket,
+                        "phase": phase,
+                        "repetition": repetition,
+                        "finished_at_utc": utc_now(),
+                    }
+                    try:
+                        barrier.wait()
+                        result = streamer.stream(prompt, args.request_timeout)
+                    except threading.BrokenBarrierError:
+                        result = {
+                            "success": False,
+                            "error_class": "barrier_broken",
+                        }
+                    except RunInterrupted:
+                        result = {"success": False, "error_class": "interrupted"}
+                    merged = {**row, **result}
+                    write(merged)
+                    if result.get("success"):
+                        key = f"{phase}_ok"
+                    else:
+                        key = f"{phase}_failed"
+                    with lock:
+                        counts[key] += 1
+
+                threads = [
+                    threading.Thread(target=worker_slot, args=(wid,))
+                    for wid in NODE_WORKER_IDS
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                # Shared-window receipt: per-phase node aggregate is derived
+                # downstream from rows sharing (bucket, phase, repetition).
+                write(
+                    {
+                        "type": "window",
+                        "schema_version": args.schema,
+                        "run_id": args.run_id,
+                        "context_bucket": str(bucket),
+                        "phase": phase,
+                        "repetition": repetition,
+                        "window_started_perf": round(window_started, 6),
+                        "window_ended_perf": round(time.perf_counter(), 6),
+                    }
+                )
+                if any(t.is_alive() for t in threads):  # pragma: no cover
+                    status = "thread_join_timeout"
+                    exit_code = 4
+                    raise RunInterrupted
+    except RunInterrupted:
+        status = "interrupted"
+        exit_code = 130
+    finally:
+        write(
+            {
+                "type": "run_summary",
+                "schema_version": args.schema,
+                "run_id": args.run_id,
+                "card_count": 4,
+                "mode": "node4_card_local",
+                "status": status,
+                "counts": counts,
+                "ended_at_utc": utc_now(),
+            }
+        )
+        writer.close()
+    return exit_code
 
 
 class RunInterrupted(Exception):
@@ -324,9 +475,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warm-repetitions", type=int, default=3)
     parser.add_argument("--request-timeout", type=float, default=1800.0)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("control", "node4"),
+        default="control",
+        help="control: one endpoint; node4: four card-local endpoints in lockstep",
+    )
+    parser.add_argument(
+        "--node4-urls",
+        default="",
+        help="comma-separated base URLs for the four card-local workers",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     install_signal_handlers()
-    sys.exit(run(parse_args()))
+    parsed = parse_args()
+    if parsed.mode == "node4":
+        sys.exit(concurrent_node4_run(parsed))
+    sys.exit(run(parsed))

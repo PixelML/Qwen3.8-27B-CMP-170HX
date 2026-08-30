@@ -1,4 +1,4 @@
-# PLAN — Qwen3.8-27B Q8 (INT8 W8A16, BF16 MTP head) PCIe scaling baseline
+# PLAN — Qwen3.8-27B Q8 (INT8 W8A16, BF16 MTP head) whole-node throughput baseline
 
 **Status:** contract fixed; no measurements taken yet.
 **Harness:** this directory (`run_matrix.sh`, `bench_client.py`, `monitor_gpu.py`,
@@ -10,23 +10,24 @@ pinned versions and `METHODOLOGY.md` for measurement definitions.
 ## Hypothesis
 
 On a four-card CMP node with a weak per-card PCIe host link, serving
-Qwen3.8-27B Q8 (INT8 W8A16, BF16 MTP head) with even tensor parallelism
-changes throughput and warm TTFT in a measurable, roughly predictable way:
+Qwen3.8-27B Q8 (INT8 W8A16, BF16 MTP head) as four simultaneous card-local
+TP1 workers changes aggregate node throughput in a measurable, roughly
+predictable way:
 
-- **Generation throughput** (single stream, 256 output tokens) should scale
-  sub-linearly from 1 to 2 to 4 cards once tensor-parallel communication
-  overhead per layer competes with the added aggregate memory bandwidth.
-- **Prompt-processing throughput** at long context (8K, 32K prompt tokens)
-  should improve with card count, but the per-card PCIe Gen-class host link
-  is expected to cap how much of the theoretical bandwidth is reachable.
+- **Whole-node generation throughput** (four workers, 256 output tokens
+  each, single stream per worker) should approach roughly 4x the single-card
+  control, with the shortfall quantifying cross-card interference and shared
+  host-link contention.
+- **Fairness** across the four identical workers should be high; per-card
+  spread is reported explicitly rather than hidden by the mean.
 - **Warm TTFT** at 32K prompt tokens is the most PCIe-sensitive metric and is
-  expected to degrade relative to the short-context buckets as activation
-  and KV traffic per token crosses the host link per card.
+  expected to degrade relative to the single-card control when four workers
+  share the host link at once.
 
-The purpose of this run is to **measure** the 1/2/4-card curve under one
-frozen configuration — not to tune it. Any follow-up optimization (parallel
-schemas, custom all-reduce, context scheduling) is out of scope until this
-baseline is committed.
+The purpose of this run is to **measure** one short single-card control and
+one four-worker whole-node round under one frozen configuration — not to tune
+anything. The former sequential 1-to-2-to-4 TP scaling sweep and TP4
+optimization are parked and out of scope for this pass.
 
 ## Fixed variable contract (frozen for the entire round)
 
@@ -36,7 +37,7 @@ invalidates comparability and requires a new plan version:
 | Variable | Fixed value |
 |---|---|
 | Model | Qwen3.8-27B Q8 / INT8 W8A16, BF16 MTP head, one revision for the whole round (recorded in `MANIFEST.md` at run time) |
-| Tensor parallelism | Even: TP = 1, 2, or 4 matching card count; no pipeline parallelism |
+| Topology | Two phases only: (A) short single-card TP1 control; (B) four simultaneous card-local TP1 workers, one per physical card. No TP2/TP4 sweep. |
 | Speculative decoding | **Off** for the entire round |
 | Model length / context cap | 36,864 tokens (32,768-token prompt bucket + output + fixed margin) |
 | Max concurrent sequences | 1 (single stream) |
@@ -52,27 +53,28 @@ invalidates comparability and requires a new plan version:
 Explicitly out of scope for this round: tuning of any kind, alternate
 checkpoints or revisions, power-limit changes, runtime or serving-stack
 variants, speculative decoding of any configuration, concurrency sweeps
-beyond the pinned single stream, and any 3-card or asymmetric topology.
+beyond the pinned single stream per worker, and any asymmetric topology.
 
-## Sequential run order
+## Phase order
 
-Topologies run **strictly one at a time, in ascending card count**:
+Phases run **strictly one at a time, control first, then node4**:
 
-1. `run_matrix.sh 1` — single-card baseline
-2. `run_matrix.sh 2` — two-card, even TP
-3. `run_matrix.sh 4` — four-card, even TP
+1. `run_matrix.sh control` — short single-card control
+2. `run_matrix.sh node4` — four card-local workers measured in one shared window
 
 Rules:
 
-- One topology must fully complete (or be classified as failed) and its
-  server must be shut down before the next invocation starts. The harness
+- One phase must fully complete (or be classified as failed) and all of its
+  workers must be shut down before the next invocation starts. The harness
   enforces this with a lock and refuses concurrent operation.
-- Each invocation launches exactly one server, runs the full bucket matrix
-  on it, and shuts it down cleanly. Servers are never reused across
-  topologies.
-- If a topology fails, the operator decides whether to re-run it after
-  recording the classified failure; the remaining topologies still run in
-  ascending order so the round produces a connected curve wherever possible.
+- control launches exactly one TP1 server; node4 launches exactly four
+  card-local TP1 servers simultaneously. Servers are never reused across
+  phases.
+- node4 workers are started together and measured in one shared time window;
+  per-card rows plus the shared window yield whole-node aggregate throughput
+  and fairness/interference evidence against the control.
+- If a phase fails, the operator decides whether to re-run it after
+  recording the classified failure; receipts are always preserved.
 
 ## Cold / warm measurement policy
 
@@ -90,7 +92,7 @@ Rules:
 
 ## Safety stop thresholds
 
-The harness watchdog aborts a topology run (classified `safety_stop`,
+The harness watchdog aborts a phase run (classified `safety_stop`,
 receipts preserved) when any active card shows:
 
 | Signal | Threshold | Basis |

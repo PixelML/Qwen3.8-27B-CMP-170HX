@@ -103,7 +103,10 @@ def plot_metric(
         ax.errorbar(
             x,
             y.to_numpy(),
-            yerr=[(y - lo).to_numpy(), (hi - y).to_numpy()],
+            yerr=[
+                (y - lo).clip(lower=0).to_numpy(),
+                (hi - y).clip(lower=0).to_numpy(),
+            ],
             color=color,
             marker=marker,
             markersize=6,
@@ -128,7 +131,10 @@ def plot_metric(
                 f"n={int(row['n'])} successful warm repetition(s) "
                 f"(contracted: {CONTRACTED_WARM_REPS})"
             )
-    ax.set_xlabel("Card count (tensor parallel = card count)")
+    if "mode" in df.columns and (df["mode"].astype(str).eq("node4_card_local")).any():
+        ax.set_xlabel("Configuration (1 = single-card control, 4 = four card-local workers)")
+    else:
+        ax.set_xlabel("Card count (tensor parallel = card count)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.set_xticks(sorted(df["card_count"].astype(int).unique()))

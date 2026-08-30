@@ -31,6 +31,9 @@ CSV_COLUMNS = [
     "context_bucket",
     "repetition",
     "phase",
+    "worker_id",
+    "worker_endpoint",
+    "mode",
     "cell_cold_samples",
     "cell_warm_samples",
     "success",
@@ -43,6 +46,11 @@ CSV_COLUMNS = [
     "prompt_throughput_tok_s",
     "generation_throughput_tok_s",
     "aggregate_output_throughput_tok_s",
+    "node_aggregate_output_tok_s",
+    "fairness_min_tok_s",
+    "fairness_max_tok_s",
+    "fairness_spread_pct",
+    "node_energy_j",
     "response_chars",
     "monitor_samples",
     "gpu_count_monitored",
@@ -79,6 +87,11 @@ def read_jsonl(path: Path) -> list[dict]:
 
 def aggregate_monitor(records: list[dict]) -> dict[str, object]:
     samples = [r for r in records if r.get("type") == "gpu_sample"]
+    per_gpu_powers: dict[object, list[float]] = {}
+    for sample in samples:
+        value = sample.get("power_w")
+        if isinstance(value, (int, float)):
+            per_gpu_powers.setdefault(sample.get("gpu_index"), []).append(value)
     powers = [r["power_w"] for r in samples if isinstance(r.get("power_w"), (int, float))]
     mems = [
         r["memory_used_mib"]
@@ -128,6 +141,10 @@ def aggregate_monitor(records: list[dict]) -> dict[str, object]:
         "throttle_samples_nonzero": len(throttled),
         "pcie_link_gen_min": min(gens) if gens else None,
         "pcie_link_width_min": min(widths) if widths else None,
+        "per_gpu_mean_power_w": {
+            gpu: round(sum(values) / len(values), 2)
+            for gpu, values in sorted(per_gpu_powers.items(), key=lambda item: str(item[0]))
+        },
     }
 
 
@@ -148,6 +165,7 @@ def main() -> int:
 
     # --- receipts -----------------------------------------------------------
     request_rows: list[dict] = []
+    node_windows: dict[tuple[str, str, str, int], dict[str, float]] = {}
     run_card_counts: dict[str, int] = {}
     run_order: list[str] = []
     for path in args.receipts:
@@ -163,6 +181,17 @@ def main() -> int:
                 if run_id and run_id not in run_card_counts:
                     run_card_counts[run_id] = int(record.get("card_count", 0))
                     run_order.append(run_id)
+            elif record.get("type") == "window":
+                window_key = (
+                    str(record.get("run_id")),
+                    str(record.get("context_bucket")),
+                    str(record.get("phase")),
+                    int(record.get("repetition", 0)),
+                )
+                node_windows[window_key] = {
+                    "start": float(record.get("window_started_perf", 0.0)),
+                    "end": float(record.get("window_ended_perf", 0.0)),
+                }
 
     if not request_rows:
         raise SystemExit("no request rows found in the provided receipts")
@@ -176,6 +205,52 @@ def main() -> int:
             str(row.get("phase")),
         )
         cell_counts[key] = cell_counts.get(key, 0) + 1
+
+    # --- node4 per-window aggregates: throughput, fairness, energy ----------
+    node4_groups: dict[tuple[str, str, str, int], list[dict]] = {}
+    for row in request_rows:
+        if row.get("mode") != "node4_card_local":
+            continue
+        group_key = (
+            str(row.get("run_id")),
+            str(row.get("context_bucket")),
+            str(row.get("phase")),
+            int(row.get("repetition", 0)),
+        )
+        node4_groups.setdefault(group_key, []).append(row)
+
+    node4_metrics: dict[tuple[str, str, str, int], dict[str, object]] = {}
+    for group_key, rows in node4_groups.items():
+        metrics: dict[str, object] = {
+            "node_aggregate_output_tok_s": None,
+            "fairness_min_tok_s": None,
+            "fairness_max_tok_s": None,
+            "fairness_spread_pct": None,
+        }
+        generation = [
+            float(row["generation_throughput_tok_s"])
+            for row in rows
+            if row.get("success")
+            and isinstance(row.get("generation_throughput_tok_s"), (int, float))
+        ]
+        window = node_windows.get(group_key)
+        if window and generation:
+            duration = window["end"] - window["start"]
+            if duration > 0:
+                metrics["node_aggregate_output_tok_s"] = round(
+                    sum(generation) / duration, 2
+                )
+        if generation:
+            gen_min = min(generation)
+            gen_max = max(generation)
+            gen_mean = sum(generation) / len(generation)
+            metrics["fairness_min_tok_s"] = round(gen_min, 2)
+            metrics["fairness_max_tok_s"] = round(gen_max, 2)
+            if gen_mean > 0:
+                metrics["fairness_spread_pct"] = round(
+                    (gen_max - gen_min) / gen_mean * 100, 2
+                )
+        node4_metrics[group_key] = metrics
 
     # --- monitor aggregates, paired to runs ---------------------------------
     monitor_pool: list[dict[str, object]] = []
@@ -212,6 +287,7 @@ def main() -> int:
             BUCKET_ORDER.get(str(r.get("context_bucket")), 99),
             0 if r.get("phase") == "cold" else 1,
             int(r.get("repetition", 0)),
+            int(r.get("worker_id", 0)),
         )
     )
 
@@ -227,6 +303,27 @@ def main() -> int:
             bucket = str(row.get("context_bucket"))
             phase = str(row.get("phase"))
             agg = monitor_by_run.get(run_id, {})
+            mode = str(row.get("mode", ""))
+            worker_id = row.get("worker_id")
+            node_metrics: dict[str, object] = {}
+            node_energy_j: object = None
+            if mode == "node4_card_local":
+                group_key = (
+                    run_id,
+                    bucket,
+                    phase,
+                    int(row.get("repetition", 0)),
+                )
+                node_metrics = node4_metrics.get(group_key, {})
+                window = node_windows.get(group_key)
+                if window and worker_id is not None:
+                    duration = window["end"] - window["start"]
+                    per_gpu_power = agg.get("per_gpu_mean_power_w") or {}
+                    ordinals = sorted(per_gpu_power, key=lambda item: str(item))
+                    if duration > 0 and len(ordinals) >= int(worker_id):
+                        power = per_gpu_power[ordinals[int(worker_id) - 1]]
+                        if isinstance(power, (int, float)):
+                            node_energy_j = round(power * duration, 1)
             writer.writerow(
                 [
                     run_id,
@@ -235,6 +332,9 @@ def main() -> int:
                     bucket,
                     row.get("repetition", ""),
                     phase,
+                    cell(worker_id),
+                    cell(row.get("worker_endpoint")),
+                    mode,
                     cell_counts.get((run_id, bucket, "cold"), 0),
                     cell_counts.get((run_id, bucket, "warm"), 0),
                     "True" if row.get("success") else "False",
@@ -247,6 +347,11 @@ def main() -> int:
                     cell(row.get("prompt_throughput_tok_s")),
                     cell(row.get("generation_throughput_tok_s")),
                     cell(row.get("aggregate_output_throughput_tok_s")),
+                    cell(node_metrics.get("node_aggregate_output_tok_s")),
+                    cell(node_metrics.get("fairness_min_tok_s")),
+                    cell(node_metrics.get("fairness_max_tok_s")),
+                    cell(node_metrics.get("fairness_spread_pct")),
+                    node_energy_j,
                     cell(row.get("response_chars")),
                     cell(agg.get("monitor_samples")),
                     cell(agg.get("gpu_count_monitored")),

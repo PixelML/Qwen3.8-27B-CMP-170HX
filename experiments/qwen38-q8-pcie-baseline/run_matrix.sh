@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# run_matrix.sh — fail-safe orchestration for the Qwen3.8-27B Q8 PCIe scaling
-# baseline (experiments/qwen38-q8-pcie-baseline).
+# run_matrix.sh — fail-safe orchestration for the Qwen3.8-27B Q8 whole-node
+# throughput baseline (experiments/qwen38-q8-pcie-baseline).
 #
-# Contract: one invocation handles ONE card-count argument (1, 2, or 4) with
-# even tensor parallelism, a single pinned OpenAI-compatible vLLM server, no
-# speculative decoding, and fixed client sampling. Topologies are run
-# strictly sequentially (one invocation at a time; ascending card count) —
-# see PLAN.md. Raw run output stays in the local (uncommitted) run
-# directory; only sanitized receipts are ever copied into receipts/.
+# Contract: one invocation handles ONE phase. "control" runs one short
+# single-card TP1 server with the pinned client. "node4" launches four
+# card-local TP1 servers simultaneously (one per physical card, identical
+# settings) and measures them in one shared time window for whole-node
+# aggregate throughput and fairness/interference evidence. No speculative
+# decoding anywhere. The former 1/2/4 TP scaling sweep and TP4 tuning are
+# out of scope (parked) — see PLAN.md. Raw run output stays in the local
+# (uncommitted) run directory; only sanitized receipts are ever copied
+# into receipts/.
 #
 # Usage:
-#   OPERATOR_LEASE_ACK=exclusive-node-lease-acknowledged \
-#   MODEL_DIR=/path/to/model/on/canonical/shared/model/storage \
-#   ./run_matrix.sh 1
+#   1) export MODEL_DIR=<path under the canonical shared model storage>
+#   2) export OPERATOR_LEASE_ACK=exclusive-node-lease-acknowledged
+#   3) ./run_matrix.sh control   # then: ./run_matrix.sh node4
 #
 # Exit codes:
 #   0 success   2 preflight failure   3 server start failure
@@ -54,12 +57,11 @@ BENCH_API_KEY="${BENCH_API_KEY:-}"    # generated per run when unset; never logg
 GPU_CLASS_OVERRIDE="${GPU_CLASS_OVERRIDE:-0}"
 POWER_POLICY_OVERRIDE="${POWER_POLICY_OVERRIDE:-0}"
 
-CARDS="${1:-}"
+PHASE="${1:-}"
 die() { printf '[run_matrix] FATAL: %s\n' "$1" >&2; exit "${2:-2}"; }
 info() { printf '[run_matrix] %s\n' "$1" >&2; }
 
-[[ "$CARDS" =~ ^([124])$ ]] || die "usage: run_matrix.sh {1|2|4}  (got: '${CARDS}')"
-CARDS="$BASH_REMATCH"
+[[ "$PHASE" =~ ^(control|node4)$ ]] || die "usage: run_matrix.sh {control|node4}  (got: '${PHASE}')"
 
 # ---------------------------------------------------------------------------
 # Preflight 1/5 — operator lease acknowledgement (explicit, not implicit)
@@ -79,8 +81,10 @@ done
 GPU_TABLE="$(nvidia-smi --query-gpu=index,name,memory.total,power.limit,driver_version \
   --format=csv,noheader,nounits)" || die "nvidia-smi query failed"
 GPU_COUNT="$(printf '%s\n' "$GPU_TABLE" | wc -l)"
-[[ "$GPU_COUNT" -ge "$CARDS" ]] || die \
-  "GPU visibility: need ${CARDS} visible GPUs for this topology, found ${GPU_COUNT}"
+EXPECTED_CARDS=1
+[[ "$PHASE" == "node4" ]] && EXPECTED_CARDS=4
+[[ "$GPU_COUNT" -ge "$EXPECTED_CARDS" ]] || die \
+  "GPU visibility: need ${EXPECTED_CARDS} visible GPUs for this phase, found ${GPU_COUNT}"
 
 GPU_INDICES=()
 while IFS= read -r row; do
@@ -110,10 +114,10 @@ while IFS= read -r row; do
     info "WARNING: GPU ${idx} power limit unreadable ('${plimit}') — power-policy preflight skipped for this card"
   fi
   GPU_INDICES+=("$idx")
-done < <(printf '%s\n' "$GPU_TABLE" | head -n "$CARDS")
+done < <(printf '%s\n' "$GPU_TABLE" | head -n "$EXPECTED_CARDS")
 
 CUDA_VISIBLE_DEVICES_LIST="$(IFS=,; echo "${GPU_INDICES[*]}")"
-info "topology cards=${CARDS} tp=${CARDS} gpu_indices=${CUDA_VISIBLE_DEVICES_LIST}"
+info "phase=${PHASE} expected_cards=${EXPECTED_CARDS} gpu_indices=${CUDA_VISIBLE_DEVICES_LIST}"
 
 # ---------------------------------------------------------------------------
 # Preflight 3/5 — no active compute processes on any visible GPU
@@ -153,7 +157,7 @@ fi
 LOCK_DIR="${OUTPUT_ROOT}/.lock"
 mkdir -p "$OUTPUT_ROOT"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  die "another invocation holds the lock (${LOCK_DIR}); topologies run strictly sequentially"
+  die "another invocation holds the lock (${LOCK_DIR}); phases run strictly sequentially"
 fi
 cleanup_lock() { rmdir "$LOCK_DIR" 2>/dev/null || true; }
 cleanup_key() { rm -f "$KEY_FILE" 2>/dev/null || true; }
@@ -162,16 +166,26 @@ cleanup_key() { rm -f "$KEY_FILE" 2>/dev/null || true; }
 # Run directory (local only — never committed; see receipts/README.md)
 # ---------------------------------------------------------------------------
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-RUN_ID="q8pcie-cards${CARDS}-${STAMP}"
-RUN_DIR="${OUTPUT_ROOT}/cards${CARDS}/${STAMP}"
+if [[ "$PHASE" == "node4" ]]; then
+  RUN_ID="q8node4-${STAMP}"
+  RUN_DIR="${OUTPUT_ROOT}/node4/${STAMP}"
+else
+  RUN_ID="q8control-${STAMP}"
+  RUN_DIR="${OUTPUT_ROOT}/control/${STAMP}"
+fi
 mkdir -p "$RUN_DIR"
 info "run_id=${RUN_ID} run_dir=${RUN_DIR}"
 
 {
   echo "run_id=${RUN_ID}"
   echo "schema=${CONTRACT_SCHEMA}"
-  echo "cards=${CARDS}"
-  echo "tensor_parallel=${CARDS}"
+  echo "phase=${PHASE}"
+  echo "tensor_parallel=1"
+  if [[ "$PHASE" == "node4" ]]; then
+    echo "workers=4 card_local=true"
+  else
+    echo "workers=1 card_local=control"
+  fi
   echo "started_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "model_dir=${MODEL_DIR}"
   echo "model_storage_root=${MODEL_STORAGE_ROOT}"
@@ -201,7 +215,30 @@ else
 fi
 BENCH_API_KEY_VALUE="$(cat "$KEY_FILE")"
 
-SERVER_PID=""
+SERVER_PIDS=()
+WORKER_PORTS=()
+launch_worker() {
+  local worker_id="$1" port="$2" gpu_index="$3" log_file="$4"
+  info "launching card-local vLLM worker ${worker_id} on port ${port} (single card)"
+  (
+    export CUDA_VISIBLE_DEVICES="$gpu_index"
+    export HF_HOME="${MODEL_STORAGE_ROOT}/hf-cache"
+    export VLLM_NO_USAGE_STATS=1
+    export DO_NOT_TRACK=1
+    export VLLM_API_KEY="$BENCH_API_KEY_VALUE"
+    exec vllm serve "$MODEL_DIR" \
+      --served-model-name "$SERVED_MODEL_NAME" \
+      --tensor-parallel-size 1 \
+      --max-model-len "$MAX_MODEL_LEN" \
+      --max-num-seqs "$MAX_NUM_SEQS" \
+      --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+      --seed "$SERVER_SEED" \
+      --port "$port" \
+      --distributed-executor-backend mp
+  ) >"$log_file" 2>&1 &
+  SERVER_PIDS+=("$!")
+  WORKER_PORTS+=("$port")
+}
 MONITOR_PID=""
 WATCHDOG_PID=""
 CLIENT_PID=""
@@ -213,71 +250,78 @@ shutdown_all() {
   [[ -n "$CLIENT_PID" ]] && kill -INT "$CLIENT_PID" 2>/dev/null || true
   [[ -n "$WATCHDOG_PID" ]] && kill "$WATCHDOG_PID" 2>/dev/null || true
   [[ -n "$MONITOR_PID" ]] && kill "$MONITOR_PID" 2>/dev/null || true
-  if [[ -n "$SERVER_PID" ]]; then
-    kill -- -"$SERVER_PID" 2>/dev/null || kill "$SERVER_PID" 2>/dev/null || true
-    for _ in $(seq 1 15); do
-      kill -0 "$SERVER_PID" 2>/dev/null || break
-      sleep 1
-    done
-    kill -9 -- -"$SERVER_PID" 2>/dev/null || true
-  fi
   [[ -n "$CLIENT_PID" ]] && wait "$CLIENT_PID" 2>/dev/null || true
   [[ -n "$MONITOR_PID" ]] && wait "$MONITOR_PID" 2>/dev/null || true
   [[ -n "$WATCHDOG_PID" ]] && wait "$WATCHDOG_PID" 2>/dev/null || true
-  # Verify the port actually closed.
-  if (exec 3<>"/dev/tcp/127.0.0.1/${BENCH_PORT}") 2>/dev/null; then
-    exec 3>&- 3<&- || true
-    info "WARNING: port ${BENCH_PORT} still accepting after shutdown"
-  fi
+  for pid in "${SERVER_PIDS[@]:-}"; do
+    [[ -n "$pid" ]] || continue
+    kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 15); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
+    done
+    kill -9 -- -"$pid" 2>/dev/null || true
+  done
+  # Verify every worker port actually closed.
+  for port in "${WORKER_PORTS[@]:-}"; do
+    if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+      exec 3>&- 3<&- || true
+      info "WARNING: port ${port} still accepting after shutdown"
+    fi
+  done
 }
 trap 'shutdown_all; cleanup_lock; cleanup_key' EXIT
 
-# ---------------------------------------------------------------------------
-# Launch one pinned OpenAI-compatible vLLM server for this topology
-# ---------------------------------------------------------------------------
-info "launching vLLM server (tp=${CARDS}) on port ${BENCH_PORT} ..."
-(
-  export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_LIST"
-  export HF_HOME="${MODEL_STORAGE_ROOT}/hf-cache"
-  export VLLM_NO_USAGE_STATS=1
-  export DO_NOT_TRACK=1
-  # API key via environment, not argv, so it never appears in process listings.
-  export VLLM_API_KEY="$BENCH_API_KEY_VALUE"
-  exec vllm serve "$MODEL_DIR" \
-    --served-model-name "$SERVED_MODEL_NAME" \
-    --tensor-parallel-size "$CARDS" \
-    --max-model-len "$MAX_MODEL_LEN" \
-    --max-num-seqs "$MAX_NUM_SEQS" \
-    --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
-    --seed "$SERVER_SEED" \
-    --port "$BENCH_PORT" \
-    --distributed-executor-backend mp
-  # Note: no speculative decoding flags of any kind — absence is the contract.
-) >"$RUN_DIR/server.log" 2>&1 &
-SERVER_PID=$!
-info "server_pid=${SERVER_PID}"
-
-# ---------------------------------------------------------------------------
-# Health gate
-# ---------------------------------------------------------------------------
-HEALTHY=0
-for _ in $(seq 1 $((HEALTH_TIMEOUT_S / HEALTH_POLL_S))); do
-  if curl -sf -m 3 -H "Authorization: Bearer ${BENCH_API_KEY_VALUE}" \
-      "http://127.0.0.1:${BENCH_PORT}/health" >/dev/null 2>&1; then
-    HEALTHY=1
-    break
-  fi
-  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    break
-  fi
-  sleep "$HEALTH_POLL_S"
-done
-if [[ "$HEALTHY" -ne 1 ]]; then
-  info "server failed its health gate (see ${RUN_DIR}/server.log — local only, never committed)"
+if [[ "$PHASE" == "node4" ]]; then
+  for worker_id in 1 2 3 4; do
+    gpu_index="${GPU_INDICES[$((worker_id - 1))]}"
+    port=$((NODE4_PORT_BASE + worker_id - 1))
+    launch_worker "$worker_id" "$port" "$gpu_index" "$RUN_DIR/worker-${worker_id}.log"
+  done
+  urls=()
+  for port in "${WORKER_PORTS[@]}"; do
+    urls+=("http://127.0.0.1:${port}")
+  done
+  ALL_URLS="$(IFS=,; echo "${urls[*]}")"
+else
+  launch_worker 1 "$BENCH_PORT" "${GPU_INDICES[0]}" "$RUN_DIR/worker-1.log"
+  ALL_URLS="http://127.0.0.1:${BENCH_PORT}"
+fi
+wait_all_healthy() {
+  local total="${#SERVER_PIDS[@]}"
+  local elapsed=0
+  while (( elapsed < HEALTH_TIMEOUT_S )); do
+    local healthy=0
+    local i
+    for i in "${!SERVER_PIDS[@]}"; do
+      local pid="${SERVER_PIDS[$i]}"
+      local port="${WORKER_PORTS[$i]}"
+      if ! kill -0 "$pid" 2>/dev/null; then
+        info "worker $((i + 1)) exited during startup (log: ${RUN_DIR}/worker-$((i + 1)).log, local only)"
+        return 3
+      fi
+      if curl -sf -m 3 -H "Authorization: Bearer ${BENCH_API_KEY_VALUE}" "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+        healthy=$((healthy + 1))
+      fi
+    done
+    if (( healthy == total )); then
+      return 0
+    fi
+    sleep "$HEALTH_POLL_S"
+    elapsed=$((elapsed + HEALTH_POLL_S))
+  done
+  info "health gate timed out before all workers were healthy"
+  return 3
+}
+if ! wait_all_healthy; then
   exit 3
 fi
-info "server healthy; settling ${SETTLE_S}s"
+info "all workers healthy; settling ${SETTLE_S}s"
 sleep "$SETTLE_S"
+
+
+# ---------------------------------------------------------------------------
+
 
 # ---------------------------------------------------------------------------
 # GPU monitor + safety watchdog (both fail-safe, both local-only output)
@@ -301,7 +345,14 @@ MONITOR_PID=$!
   if [[ "$ecc_available" -eq 0 ]]; then
     echo "ecc_watch=unavailable_on_this_stack" >"$RUN_DIR/watchdog.txt"
   fi
-  while kill -0 "$SERVER_PID" 2>/dev/null; do
+  server_alive=0
+  for pid in "${SERVER_PIDS[@]:-}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      server_alive=1
+      break
+    fi
+  done
+  while [[ "$server_alive" -eq 1 ]]; do
     tripped=0
     for idx in "${GPU_INDICES[@]}"; do
       row="$(nvidia-smi -i "$idx" \
@@ -343,6 +394,13 @@ MONITOR_PID=$!
       exit 5
     fi
     sleep "$WATCHDOG_INTERVAL_S"
+    server_alive=0
+    for pid in "${SERVER_PIDS[@]:-}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        server_alive=1
+        break
+      fi
+    done
   done
   exit 0
 ) &
@@ -351,16 +409,23 @@ WATCHDOG_PID=$!
 # ---------------------------------------------------------------------------
 # Benchmark client — cold + 3 warm per bucket, sanitized JSONL receipts
 # ---------------------------------------------------------------------------
-info "starting benchmark client (cold + 3 warm per bucket)"
+info "starting benchmark client (${PHASE})"
 set +e
-python3 "$SCRIPT_DIR/bench_client.py" \
-  --base-url "http://127.0.0.1:${BENCH_PORT}" \
-  --api-key "$BENCH_API_KEY_VALUE" \
-  --card-count "$CARDS" \
-  --run-id "$RUN_ID" \
-  --schema "$CONTRACT_SCHEMA" \
-  --warm-repetitions 3 \
-  --output "$RUN_DIR/receipt.jsonl" &
+if [[ "$PHASE" == "node4" ]]; then
+  python3 "$SCRIPT_DIR/bench_client.py" \
+    --mode node4 --node4-urls "$ALL_URLS" \
+    --api-key "$BENCH_API_KEY_VALUE" \
+    --card-count 4 \
+    --run-id "$RUN_ID" --schema "$CONTRACT_SCHEMA" \
+    --warm-repetitions 3 --output "$RUN_DIR/receipt.jsonl" &
+else
+  python3 "$SCRIPT_DIR/bench_client.py" \
+    --mode control --base-url "$ALL_URLS" \
+    --api-key "$BENCH_API_KEY_VALUE" \
+    --card-count 1 \
+    --run-id "$RUN_ID" --schema "$CONTRACT_SCHEMA" \
+    --warm-repetitions 3 --output "$RUN_DIR/receipt.jsonl" &
+fi
 CLIENT_PID=$!
 wait "$CLIENT_PID"
 CLIENT_RC=$?
@@ -388,5 +453,5 @@ if [[ "$CLIENT_RC" -ne 0 ]]; then
   info "benchmark client exited ${CLIENT_RC}; classified failure preserved in receipt.jsonl"
   exit 4
 fi
-info "topology cards=${CARDS} completed"
+info "phase=${PHASE} completed"
 exit 0

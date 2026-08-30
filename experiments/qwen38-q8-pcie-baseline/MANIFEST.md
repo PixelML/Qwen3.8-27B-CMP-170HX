@@ -35,7 +35,7 @@ time; do not copy from a previous round).
 |---|---|
 | Node class | four-card CMP node |
 | Accelerator | CMP 170HX class, 64 GiB per card |
-| Card count topologies | 1, 2, 4 (even tensor parallelism) |
+| Topology | Short single-card TP1 control + four simultaneous card-local TP1 workers (no TP2/TP4) |
 | Effective per-card PCIe state | **TODO** (record negotiated link generation/width per card from the live monitor output at run time — do not assume from the hardware datasheet) |
 | Power policy | 180 W per card for the entire benchmark round |
 
@@ -47,7 +47,7 @@ time; do not copy from a previous round).
 | Context buckets (nominal) | 1,024 / 8,192 / 32,768 prompt tokens |
 | Requested output tokens | exactly 256 per request (EOS suppressed) |
 | Sampling | temperature 0.0, top_p 1.0, fixed seed 1234, single stream |
-| Repetitions | 1 designated cold + 3 warm per bucket per topology |
+| Repetitions | 1 designated cold + 3 warm per bucket per phase; node4 runs all four workers per repetition in one shared window |
 | Receipt schema | `qwen38-q8-pcie-baseline.v1` (JSONL, sanitized before commit) |
 
 ## Run record (filled at run time)
