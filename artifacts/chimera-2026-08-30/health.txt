@@ -1,0 +1,4 @@
+Manual post-run kernel check at 2026-08-30T02:46Z:
+sudo journalctl -k --since "2026-08-30 02:30:00" --no-pager | grep -Ei "nvrm|xid|gpu has fallen off"
+Result: no matching NVIDIA Xid or GPU-fallen-off lines.
+All three cards remained visible after the sequential runs.
