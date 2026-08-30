@@ -244,6 +244,33 @@ Raw JSON: [bench-v6-run1.json](artifacts/bench-v6-run1.json),
 | v9a/v9b | 49011398/49011444 | create returned stopped | destroyed immediately | $0 |
 | v9c | 49011536 | public base + clone, prepare fix | **147.7 tok/s, gap closed** | see below |
 
+## Local rerun - chimera 3x CMP 170HX (2026-08-29)
+
+Same v9 recipe rerun on our own 3-card box, power-capped at **180 W**
+(VAST ran 255 W), one card. Weights rebuilt once to
+/library/models/qwen38/bench-2026-08-29 (base dbirks W4A16-AutoRound +
+syv post-quant chain + DFlash2 drafter), stored on the 8.4 TB library
+NFS for reuse.
+
+| metric | local (180 W) | VAST v9 (255 W) | ratio |
+|---|---|---|---|
+| decode 256 tok | **47.0 tok/s** | 147.7 | 3.1x gap |
+| prefill 8192 tok | **1927.6 tok/s** | 2156 (6.6K) | 1.12x gap |
+| TTFT | 191 ms | 76 ms | - |
+| acceptance length | 2.85-3.32 | 2.56-2.80 | better locally |
+
+Prefill lands within 12% of VAST despite the lower cap (bandwidth-bound).
+Speculative acceptance is actually better locally (40960-token draft vocab
+active). The decode gap tracks the power envelope: VAST held 1455 MHz
+under spec load, this box holds 1140-1275 MHz at 99% util with no
+power-brake or thermal flags. **Recipe reproduced; delta is the 180 W
+envelope, not the stack.** Run 1 (lued INT8-W8A16, wrong checkpoint,
+caught mid-run): 30.9 tok/s / 1620 prefill, kept for the record.
+
+DeepSeek-V4-Flash-0731 on all 3 cards is split to its own repo:
+[DeepSeek-V4-Flash-0731-CMP-170HX](https://github.com/PixelML/DeepSeek-V4-Flash-0731-CMP-170HX)
+(83.3 tok/s decode).
+
 ## Cost record
 
 - v6 rate: $0.2944/hr on-demand; started ~11:05 UTC 2026-08-28
