@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Controlled single-request benchmark against the vLLM OpenAI API.
+"""Legacy SSE-event-counting benchmark against the vLLM OpenAI API.
+
+Do not use this harness for speculative-decoding throughput. One SSE event can
+contain multiple accepted tokens, so this script undercounts output. Use
+``scripts/bench-usage.py`` for usage-token-counted measurements.
+
 Protocol matches the LocalMaxxing reference: ~88-token prompt, 256 output
 tokens, greedy, streaming, one request at a time."""
 import json, sys, time

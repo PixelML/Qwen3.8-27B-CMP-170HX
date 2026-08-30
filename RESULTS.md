@@ -1,10 +1,79 @@
-# RESULTS — Qwen3.8-27B + DFlash2 on a rented CMP 170HX
+# RESULTS — Qwen3.8-27B + DFlash2 on CMP 170HX
 
-**Date:** 2026-08-28
-**Working instance:** Vast.ai 49011536 (`qwen38-v9c`), on-demand
+**Dates:** 2026-08-28 (Vast.ai), 2026-08-30 (local Chimera)
+**Local system:** Chimera VM 215, three CMP 170HX cards, sequential runs
+**Vast.ai instance:** 49011536 (`qwen38-v9c`), on-demand
 **Earlier failure:** instance 48995474 — private GHCR image, documented below
 
 ## Bottom line
+
+All three local cards reproduce the Vast recipe within a 5% card-to-card
+decode spread and average 136.38 tok/s at the configured 180 W limit.
+
+## Chimera three-card replication (2026-08-30)
+
+The exact v9 W4A16 fast-variant + DFlash2 recipe was rerun sequentially on
+three local CMP 170HX 64 GB cards in Chimera VM 215. Each card used the same
+model files from the NFS library disk:
+
+- main: `/library/models/qwen38/bench-2026-08-29/Qwen3.8-27B-W4A16-AutoRound-fast`
+- draft: `/library/models/qwen38/bench-2026-08-29/Qwen3.8-27B-DFlash2-W4A16`
+
+No checkpoint was downloaded during these runs. Runtime pins were vLLM 0.27.1,
+torch 2.13.0, flashinfer-python 0.6.16.post3, flashinfer-cubin 0.6.13, and
+syv-ai recipe commit `69ba4d0688c6ae76cb9d3c4a5c3b36445e1b040c`.
+The driver was 610.43.03 and all three requested/current power limits remained
+180 W.
+
+### Protocol
+
+- `SPEC=dflash2`, `DFLASH_TOKENS=7`, `CTX=fast`, BF16 KV, FLASH_ATTN
+- fast W4A16 target, W4A16 DFlash2 drafter, `MAX_SEQS=1`, 65,536 context
+- one warmup plus three measured samples for each request shape
+- 11-token story prompt with 256 and 900 forced output tokens
+- 6,603-token long prompt with eight output tokens for prefill
+- streaming with `stream_options.include_usage=true`; throughput uses
+  `usage.completion_tokens`, not SSE event count
+
+### Results
+
+| Card / PCI bus | Decode 256 | Decode 900 | TTFT 256 | Prefill 6.6K | Peak VRAM | Peak core / memory |
+|---|---:|---:|---:|---:|---:|---:|
+| GPU0 / 01:00.0 | 135.31 tok/s | 121.28 tok/s | 201.2 ms | 1957.3 tok/s | 57,682 MiB | 51 / 52 C |
+| GPU1 / 02:00.0 | **140.27 tok/s** | **124.78 tok/s** | 189.7 ms | 1954.7 tok/s | 57,680 MiB | 51 / 59 C |
+| GPU2 / 03:00.0 | 133.57 tok/s | 119.94 tok/s | **181.4 ms** | 1926.0 tok/s | 58,600 MiB | 51 / 61 C |
+| Mean | **136.38 tok/s** | **122.00 tok/s** | 190.8 ms | **1946.0 tok/s** | — | — |
+| Vast v9, 255 W | 147.7 tok/s | 134.5 tok/s | 76 ms | 2156 tok/s | 57.8 GiB | 73 / N/A C |
+
+The local three-card mean retains 92.3% of Vast v9 decode256 and 90.3% of its
+prefill throughput at a configured 180 W ceiling. GPU1 also reproduces the
+140.5 tok/s v10 cross-node rerun almost exactly. Fastest-to-slowest spread was
+5.0% for decode256, 4.0% for decode900, and 1.6% for prefill; this is small
+enough to treat all three cards as the same performance class.
+
+All cards reached 100% utilization. Post-run `nvidia-smi -q` showed
+`SW Power Cap: Active` and current/requested limits of 180 W. Half-second
+instantaneous telemetry contained brief readings above the configured ceiling
+(185 W, 223 W, and 195 W respectively); these raw values are preserved rather
+than silently clipped. Peak temperatures were safely below the 80 C core and
+85 C memory stop thresholds. A post-run kernel journal check found no NVIDIA
+Xid or GPU-fallen-off event.
+
+### Why the earlier local 47 tok/s was wrong
+
+The previous local harness counted SSE events as if each event were one token.
+The corrected evidence shows 91 SSE events carrying 256 completion tokens and
+348 events carrying 900 completion tokens. This is expected with speculative
+decoding because one event can contain multiple accepted tokens. Applying the
+same v9 `usage.completion_tokens` accounting changes GPU0 from the misleading
+~47 tok/s report to 135.31 tok/s without changing the model or card.
+
+Use [`scripts/bench-usage.py`](scripts/bench-usage.py) for future comparisons.
+It fails closed if the server omits completion-token usage. The legacy
+[`scripts/bench.py`](scripts/bench.py) is retained only to explain the old
+v6/v8 event-counted artifacts. The sequential runner is
+[`scripts/run-chimera-card.sh`](scripts/run-chimera-card.sh); raw evidence is
+under [`artifacts/chimera-2026-08-30/`](artifacts/chimera-2026-08-30/).
 
 ## v10 — Ninfer trick A/B (2026-08-28, instance 49049977)
 

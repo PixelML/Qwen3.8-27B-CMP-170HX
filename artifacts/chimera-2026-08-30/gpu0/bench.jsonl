@@ -1,0 +1,27 @@
+{"gpu_index": 0, "hostname": "agent-sandbox", "protocol": "v9-usage-token-counted", "timestamp": "2026-08-30T02:38:58.710379+00:00", "type": "metadata"}
+{"long": 6603, "story": 11, "type": "prompt_tokens"}
+{"completion_tokens": 256, "sse_events": 91, "type": "stream_accounting"}
+{"completion_tokens": 256, "sse_events": 91, "type": "stream_accounting"}
+{"case": "decode256", "completion_tokens": 256, "decode_tok_s": 134.85, "prefill_tok_s": 54.7, "prompt_tokens": 11, "sample": 1, "total_s": 2.092, "ttft_ms": 201.0, "type": "sample"}
+{"completion_tokens": 256, "sse_events": 91, "type": "stream_accounting"}
+{"case": "decode256", "completion_tokens": 256, "decode_tok_s": 135.35, "prefill_tok_s": 58.8, "prompt_tokens": 11, "sample": 2, "total_s": 2.071, "ttft_ms": 186.9, "type": "sample"}
+{"completion_tokens": 256, "sse_events": 91, "type": "stream_accounting"}
+{"case": "decode256", "completion_tokens": 256, "decode_tok_s": 135.74, "prefill_tok_s": 51.0, "prompt_tokens": 11, "sample": 3, "total_s": 2.094, "ttft_ms": 215.6, "type": "sample"}
+{"case": "decode256", "decode_tok_s": 135.31, "mean_completion_tokens": 256.0, "mean_total_s": 2.086, "mean_ttft_ms": 201.2, "prefill_tok_s": 54.7, "prompt_tokens": 11, "samples": 3, "type": "summary"}
+{"completion_tokens": 900, "sse_events": 348, "type": "stream_accounting"}
+{"completion_tokens": 900, "sse_events": 348, "type": "stream_accounting"}
+{"case": "decode900", "completion_tokens": 900, "decode_tok_s": 121.5, "prefill_tok_s": 56.1, "prompt_tokens": 11, "sample": 1, "total_s": 7.595, "ttft_ms": 196.2, "type": "sample"}
+{"completion_tokens": 900, "sse_events": 348, "type": "stream_accounting"}
+{"case": "decode900", "completion_tokens": 900, "decode_tok_s": 121.29, "prefill_tok_s": 64.4, "prompt_tokens": 11, "sample": 2, "total_s": 7.583, "ttft_ms": 170.9, "type": "sample"}
+{"completion_tokens": 900, "sse_events": 348, "type": "stream_accounting"}
+{"case": "decode900", "completion_tokens": 900, "decode_tok_s": 121.04, "prefill_tok_s": 62.8, "prompt_tokens": 11, "sample": 3, "total_s": 7.602, "ttft_ms": 175.2, "type": "sample"}
+{"case": "decode900", "decode_tok_s": 121.28, "mean_completion_tokens": 900.0, "mean_total_s": 7.594, "mean_ttft_ms": 180.8, "prefill_tok_s": 60.9, "prompt_tokens": 11, "samples": 3, "type": "summary"}
+{"completion_tokens": 8, "sse_events": 5, "type": "stream_accounting"}
+{"completion_tokens": 8, "sse_events": 5, "type": "stream_accounting"}
+{"case": "prefill_long", "completion_tokens": 8, "decode_tok_s": 102.77, "prefill_tok_s": 1959.8, "prompt_tokens": 6603, "sample": 1, "total_s": 3.437, "ttft_ms": 3369.2, "type": "sample"}
+{"completion_tokens": 8, "sse_events": 5, "type": "stream_accounting"}
+{"case": "prefill_long", "completion_tokens": 8, "decode_tok_s": 103.53, "prefill_tok_s": 1955.4, "prompt_tokens": 6603, "sample": 2, "total_s": 3.444, "ttft_ms": 3376.7, "type": "sample"}
+{"completion_tokens": 8, "sse_events": 5, "type": "stream_accounting"}
+{"case": "prefill_long", "completion_tokens": 8, "decode_tok_s": 109.7, "prefill_tok_s": 1956.5, "prompt_tokens": 6603, "sample": 3, "total_s": 3.439, "ttft_ms": 3374.9, "type": "sample"}
+{"case": "prefill_long", "decode_tok_s": 105.24, "mean_completion_tokens": 8.0, "mean_total_s": 3.44, "mean_ttft_ms": 3373.6, "prefill_tok_s": 1957.3, "prompt_tokens": 6603, "samples": 3, "type": "summary"}
+{"core_temp_c": 51.0, "memory_clock_mhz": 1458.0, "memory_temp_c": 52.0, "memory_used_mib": 57682.0, "power_w": 185.48, "sm_clock_mhz": 1395.0, "type": "gpu_peaks", "utilization_gpu_pct": 100.0}

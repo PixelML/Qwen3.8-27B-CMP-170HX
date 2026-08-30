@@ -1,10 +1,36 @@
-# Qwen3.8-27B W4A16 + DFlash2 speculative decoding on a Vast.ai CMP 170HX
+# Qwen3.8-27B W4A16 + DFlash2 speculative decoding on CMP 170HX
 
-**Date:** 2026-08-28
-**Status:** ✅ Benchmark complete — 147.7 tok/s decode, 2156 tok/s prefill
-**Cost basis:** on-demand, ~$0.289/hr (includes 80 GB disk)
+**Dates:** 2026-08-28 (Vast.ai), 2026-08-30 (local Chimera)
+**Status:** benchmark complete — 133.6–140.3 tok/s across three local cards
+**Vast.ai cost basis:** on-demand, ~$0.289/hr (includes 80 GB disk)
 
-## Summary
+## Local Chimera replication — three cards at 180 W
+
+We reproduced the v9 fast-variant recipe sequentially on all three CMP 170HX
+cards passed through to Chimera VM 215. The main and DFlash2 checkpoints were
+reused from `/library`; the run did not download a second copy of either model.
+
+| Card | Decode 256 | Decode 900 | TTFT | Prefill 6.6K | Peak core / memory |
+|---|---:|---:|---:|---:|---:|
+| GPU0 | 135.31 tok/s | 121.28 tok/s | 201.2 ms | 1957.3 tok/s | 51 / 52 C |
+| GPU1 | **140.27 tok/s** | **124.78 tok/s** | 189.7 ms | 1954.7 tok/s | 51 / 59 C |
+| GPU2 | 133.57 tok/s | 119.94 tok/s | **181.4 ms** | 1926.0 tok/s | 51 / 61 C |
+| Mean | **136.38 tok/s** | **122.00 tok/s** | 190.8 ms | **1946.0 tok/s** | — |
+
+The decode256 spread is 5.0% from fastest to slowest. All cards reached 100%
+utilization, retained the requested 180 W ceiling, showed active software power
+capping after load, and completed without an NVIDIA Xid. DFlash2 acceptance
+length was in the same family as v9 (roughly 2.56–2.65 during steady decode).
+
+An earlier local report of ~47 tok/s was a measurement bug: it counted 91 SSE
+events for a response containing 256 completion tokens. Speculative decoding
+can emit multiple accepted tokens per event. The new
+[`scripts/bench-usage.py`](scripts/bench-usage.py) harness requires
+`usage.completion_tokens` and refuses to publish an event-counted fallback.
+Raw samples, half-second telemetry, power-state snapshots, and server evidence
+are under [`artifacts/chimera-2026-08-30/`](artifacts/chimera-2026-08-30/).
+
+## Vast.ai baseline
 
 We reproduced the syv-ai/qwen38-27b-rtx3090 recipe on a rented Vast.ai
 CMP 170HX 64 GB (Portugal Gen2 x4, ~$0.27/hr). The first attempt with the
@@ -57,8 +83,8 @@ The CMP 170HX is a mining card repurposed for LLM inference:
 - 64 GB HBM2e with very high memory bandwidth (~1.5 TB/s class)
 - **PCIe Gen2 x4 host link only** — model download/weight load is slow; fine
   once weights are resident, painful for cold starts
-- **No FP8/FP4 tensor-core paths** (compute capability 8.6-ish, stripped SKU) —
-  W8A16 main + W4A16 draft is roughly the right quantization envelope
+- **No FP8/FP4 tensor-core paths** (the tested cards report SM80) — W4A16 main
+  + W4A16 draft is the validated quantization envelope
 - No display outputs, fan/power quirks vary by vendor
 
 ## Reproducing the *diagnosis*
